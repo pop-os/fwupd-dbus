@@ -1,0 +1,13 @@
+[package]
+name = "fwupd-dbus"
+version = "0.1.0"
+authors = ["Michael Aaron Murphy <mmstick@pm.me>"]
+edition = "2018"
+license = "MIT"
+description = "fwupd dbus client bindings"
+
+[dependencies]
+dbus = "0.6.4"
+shrinkwraprs = "0.2.1"
+err-derive = "0.1.5"
+bitflags = "1.1.0"

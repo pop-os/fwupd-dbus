@@ -1,3 +1,4 @@
+use crate::common::*;
 use crate::dbus_helpers::*;
 use crate::{Client, DBusEntry};
 use dbus::arg::RefArg;
@@ -39,17 +40,21 @@ pub enum UpdateError {
 pub struct Remote {
     pub _type: u16,
     pub agreement: Option<Box<str>>,
+    pub approval_required: bool,
     pub checksum: Option<Box<str>>,
     pub enabled: bool,
     pub filename_cache: Box<str>,
     pub filename_source: Box<str>,
+    pub firmware_base_uri: Option<Box<str>>,
     pub keyring: u16,
     pub modification_time: u64,
+    pub password: Option<Box<str>>,
     pub priority: i16,
     pub remote_id: Box<str>,
     pub report_uri: Option<Box<str>>,
     pub title: Box<str>,
     pub uri: Option<Box<str>>,
+    pub username: Option<Box<str>>,
 }
 
 impl Remote {
@@ -168,12 +173,15 @@ impl FromIterator<DBusEntry> for Remote {
             let key = key.as_str();
             match key {
                 "Agreement" => remote.agreement = Some(dbus_str(&value, key).into()),
-                "Checksum" => remote.checksum = Some(dbus_str(&value, key).into()),
+                "ApprovalRequired" => remote.approval_required = dbus_u64(&value, key) != 0,
+                KEY_CHECKSUM => remote.checksum = Some(dbus_str(&value, key).into()),
                 "Enabled" => remote.enabled = dbus_u64(&value, key) != 0,
                 "FilenameCache" => remote.filename_cache = dbus_str(&value, key).into(),
                 "FilenameSource" => remote.filename_source = dbus_str(&value, key).into(),
+                "FirmwareBaseUri" => remote.firmware_base_uri = Some(dbus_str(&value, key).into()),
                 "Keyring" => remote.keyring = dbus_u64(&value, key) as u16,
                 "ModificationTime" => remote.modification_time = dbus_u64(&value, key),
+                "Password" => remote.password = Some(dbus_str(&value, key).into()),
                 "Priority" => {
                     let value = value
                         .as_iter()
@@ -183,11 +191,12 @@ impl FromIterator<DBusEntry> for Remote {
 
                     remote.priority = dbus_i64(&value, key) as i16;
                 }
-                "RemoteId" => remote.remote_id = dbus_str(&value, key).into(),
+                KEY_REMOTE_ID => remote.remote_id = dbus_str(&value, key).into(),
                 "ReportUri" => remote.report_uri = Some(dbus_str(&value, key).into()),
                 "Title" => remote.title = dbus_str(&value, key).into(),
                 "Type" => remote._type = dbus_u64(&value, key) as u16,
-                "Uri" => remote.uri = Some(dbus_str(&value, key).into()),
+                "Username" => remote.username = Some(dbus_str(&value, key).into()),
+                KEY_URI => remote.uri = Some(dbus_str(&value, key).into()),
                 other => {
                     eprintln!("unknown remote key: {} ({})", other, value.signature());
                 }

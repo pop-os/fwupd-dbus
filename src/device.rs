@@ -1,9 +1,9 @@
+use crate::common::*;
 use crate::dbus_helpers::*;
 use crate::{Client, DBusEntry, Error, Release};
 use dbus::arg::RefArg;
 use std::iter::FromIterator;
 
-// From libfwupd/fwupd-enums.h
 bitflags! {
     pub struct DeviceFlags: u64 {
         /// Device cannot be removed easily
@@ -60,20 +60,58 @@ impl Default for DeviceFlags {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u32)]
+pub enum UpdateState {
+    Unknown,
+    Pending,
+    Success,
+    Failed,
+    NeedsReboot,
+    FailedTransient,
+}
+
+impl From<u32> for UpdateState {
+    fn from(value: u32) -> Self {
+        use self::UpdateState::*;
+        match value {
+            0 => Unknown,
+            1 => Pending,
+            2 => Success,
+            3 => Failed,
+            4 => NeedsReboot,
+            5 => FailedTransient,
+            _ => Unknown,
+        }
+    }
+}
+
 /// A device that is potentially-supported by fwupd.
 #[derive(Debug, Default)]
 pub struct Device {
+    pub checksum: Option<Box<str>>,
     pub created: u64,
+    pub description: Option<Box<str>>,
     pub device_id: Box<str>,
     pub flags: DeviceFlags,
+    pub flashes_left: Option<u32>,
     pub guid: Box<[Box<str>]>,
     pub icon: Box<[Box<str>]>,
+    pub install_duration: Option<u32>,
     pub instance_ids: Box<[Box<str>]>,
+    pub modified: Option<u64>,
     pub name: Box<str>,
+    pub parent_device_id: Option<Box<str>>,
     pub plugin: Box<str>,
+    pub serial: Option<Box<str>>,
+    pub summary: Option<Box<str>>,
     pub update_error: Option<Box<str>>,
+    pub update_message: Option<Box<str>>,
+    pub update_state: Option<UpdateState>,
     pub vendor_id: Box<str>,
     pub vendor: Box<str>,
+    pub version_bootloader: Option<Box<str>>,
+    pub version_lowest: Option<Box<str>>,
     pub version: Box<str>,
 }
 
@@ -119,10 +157,13 @@ impl FromIterator<DBusEntry> for Device {
         for (key, value) in iter {
             let key = key.as_str();
             match key {
-                "Created" => device.created = dbus_u64(&value, key).into(),
-                "DeviceId" => device.device_id = dbus_str(&value, key).into(),
-                "Flags" => device.flags = DeviceFlags::from_bits_truncate(dbus_u64(&value, key)),
-                "Guid" => {
+                KEY_CHECKSUM => device.checksum = Some(dbus_str(&value, key).into()),
+                KEY_CREATED => device.created = dbus_u64(&value, key).into(),
+                KEY_DESCRIPTION => device.description = Some(dbus_str(&value, key).into()),
+                KEY_DEVICE_ID => device.device_id = dbus_str(&value, key).into(),
+                KEY_FLAGS => device.flags = DeviceFlags::from_bits_truncate(dbus_u64(&value, key)),
+                KEY_FLASHES_LEFT => device.flashes_left = Some(dbus_u64(&value, key) as u32),
+                KEY_GUID => {
                     device.guid = value
                         .as_iter()
                         .expect("Guid is not a variant")
@@ -131,7 +172,7 @@ impl FromIterator<DBusEntry> for Device {
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
-                "Icon" => {
+                KEY_ICON => {
                     device.icon = value
                         .as_iter()
                         .expect("Icon is not a variant")
@@ -140,7 +181,10 @@ impl FromIterator<DBusEntry> for Device {
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
-                "InstanceIds" => {
+                KEY_INSTALL_DURATION => {
+                    device.install_duration = Some(dbus_u64(&value, key) as u32)
+                }
+                KEY_INSTANCE_IDS => {
                     device.instance_ids = value
                         .as_iter()
                         .expect("InstanceIds is not a variant")
@@ -149,12 +193,26 @@ impl FromIterator<DBusEntry> for Device {
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
-                "Name" => device.name = dbus_str(&value, key).into(),
-                "Plugin" => device.plugin = dbus_str(&value, key).into(),
-                "UpdateError" => device.update_error = Some(dbus_str(&value, key).into()),
-                "Vendor" => device.vendor = dbus_str(&value, key).into(),
-                "VendorId" => device.vendor_id = dbus_str(&value, key).into(),
-                "Version" => device.version = dbus_str(&value, key).into(),
+                KEY_MODIFIED => device.modified = Some(dbus_u64(&value, key)),
+                KEY_NAME => device.name = dbus_str(&value, key).into(),
+                KEY_PARENT_DEVICE_ID => {
+                    device.parent_device_id = Some(dbus_str(&value, key).into())
+                }
+                KEY_PLUGIN => device.plugin = dbus_str(&value, key).into(),
+                KEY_SERIAL => device.serial = Some(dbus_str(&value, key).into()),
+                KEY_SUMMARY => device.summary = Some(dbus_str(&value, key).into()),
+                KEY_UPDATE_ERROR => device.update_error = Some(dbus_str(&value, key).into()),
+                KEY_UPDATE_MESSAGE => device.update_message = Some(dbus_str(&value, key).into()),
+                KEY_UPDATE_STATE => {
+                    device.update_state = Some(UpdateState::from(dbus_u64(&value, key) as u32))
+                }
+                KEY_VENDOR => device.vendor = dbus_str(&value, key).into(),
+                KEY_VENDOR_ID => device.vendor_id = dbus_str(&value, key).into(),
+                KEY_VERSION => device.version = dbus_str(&value, key).into(),
+                KEY_VERSION_BOOTLOADER => {
+                    device.version_bootloader = Some(dbus_str(&value, key).into())
+                }
+                KEY_VERSION_LOWEST => device.version_lowest = Some(dbus_str(&value, key).into()),
                 other => {
                     eprintln!("unknown remote key: {} ({})", other, value.signature());
                 }

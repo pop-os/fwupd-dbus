@@ -1,3 +1,4 @@
+use crate::common::*;
 use crate::dbus_helpers::*;
 use crate::DBusEntry;
 use dbus::arg::RefArg;
@@ -21,29 +22,44 @@ impl Default for ReleaseFlags {
     }
 }
 
+bitflags! {
+    pub struct TrustFlags: u64 {
+        const PAYLOAD  = 1 << 0;
+        const METADATA = 1 << 1;
+    }
+}
+
+impl Default for TrustFlags {
+    fn default() -> Self {
+        TrustFlags::empty()
+    }
+}
+
 /// Information about an available fwupd remote.
 #[derive(Debug, Default)]
 pub struct Release {
-    appstream_id: Box<str>,
-    categories: Box<[Box<str>]>,
-    checksums: Box<[Box<str>]>,
-    description: Box<str>,
-    details_url: Box<str>,
-    filename: Box<str>,
-    flags: ReleaseFlags,
-    homepage: Box<str>,
-    install_duration: u32,
-    license: Box<str>,
-    name: Box<str>,
-    protocol: Box<str>,
-    remote_id: Box<str>,
-    size: u64,
-    source_url: Box<str>,
-    summary: Box<str>,
-    update_message: Box<str>,
-    uri: Box<str>,
-    vendor: Box<str>,
-    version: Box<str>,
+    pub appstream_id: Box<str>,
+    pub categories: Box<[Box<str>]>,
+    pub checksums: Box<[Box<str>]>,
+    pub created: u64,
+    pub description: Box<str>,
+    pub details_url: Box<str>,
+    pub filename: Box<str>,
+    pub flags: ReleaseFlags,
+    pub homepage: Box<str>,
+    pub install_duration: u32,
+    pub license: Box<str>,
+    pub name: Box<str>,
+    pub protocol: Box<str>,
+    pub remote_id: Box<str>,
+    pub size: u64,
+    pub source_url: Box<str>,
+    pub summary: Box<str>,
+    pub trust_flags: TrustFlags,
+    pub update_message: Box<str>,
+    pub uri: Box<str>,
+    pub vendor: Box<str>,
+    pub version: Box<str>,
 }
 
 impl FromIterator<DBusEntry> for Release {
@@ -56,8 +72,8 @@ impl FromIterator<DBusEntry> for Release {
         for (key, value) in iter {
             let key = key.as_str();
             match key {
-                "AppstreamId" => release.appstream_id = dbus_str(&value, key).into(),
-                "Categories" => {
+                KEY_APPSTREAM_ID => release.appstream_id = dbus_str(&value, key).into(),
+                KEY_CATEGORIES => {
                     release.categories = value
                         .as_iter()
                         .expect("Categories is not a variant")
@@ -66,7 +82,7 @@ impl FromIterator<DBusEntry> for Release {
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
-                "Checksums" => {
+                KEY_CHECKSUM => {
                     release.checksums = value
                         .as_iter()
                         .expect("Checksums is not a variant")
@@ -75,20 +91,28 @@ impl FromIterator<DBusEntry> for Release {
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
-                "Description" => release.description = dbus_str(&value, key).into(),
-                "DetailsUrl" => release.details_url = dbus_str(&value, key).into(),
-                "filename" => release.filename = dbus_str(&value, key).into(),
-                "flags" => release.flags = ReleaseFlags::from_bits_truncate(dbus_u64(&value, key)),
-                "Homepage" => release.homepage = dbus_str(&value, key).into(),
-                "InstallDuration" => release.install_duration = dbus_u64(&value, key) as u32,
-                "License" => release.license = dbus_str(&value, key).into(),
-                "Size" => release.size = dbus_u64(&value, key),
-                "SourceUrl" => release.source_url = dbus_str(&value, key).into(),
-                "Summary" => release.summary = dbus_str(&value, key).into(),
-                "UpdateMessage" => release.update_message = dbus_str(&value, key).into(),
-                "Uri" => release.uri = dbus_str(&value, key).into(),
-                "Vendor" => release.vendor = dbus_str(&value, key).into(),
-                "Version" => release.version = dbus_str(&value, key).into(),
+                KEY_DESCRIPTION => release.description = dbus_str(&value, key).into(),
+                KEY_DETAILS_URL => release.details_url = dbus_str(&value, key).into(),
+                KEY_FILENAME => release.filename = dbus_str(&value, key).into(),
+                KEY_FLAGS => {
+                    release.flags = ReleaseFlags::from_bits_truncate(dbus_u64(&value, key))
+                }
+                KEY_HOMEPAGE => release.homepage = dbus_str(&value, key).into(),
+                KEY_INSTALL_DURATION => release.install_duration = dbus_u64(&value, key) as u32,
+                KEY_LICENSE => release.license = dbus_str(&value, key).into(),
+                // KEY_METADATA => (),
+                KEY_PROTOCOL => release.protocol = dbus_str(&value, key).into(),
+                KEY_REMOTE_ID => release.remote_id = dbus_str(&value, key).into(),
+                KEY_SIZE => release.size = dbus_u64(&value, key),
+                KEY_SOURCE_URL => release.source_url = dbus_str(&value, key).into(),
+                KEY_SUMMARY => release.summary = dbus_str(&value, key).into(),
+                KEY_TRUST_FLAGS => {
+                    release.trust_flags = TrustFlags::from_bits_truncate(dbus_u64(&value, key))
+                }
+                KEY_UPDATE_MESSAGE => release.update_message = dbus_str(&value, key).into(),
+                KEY_URI => release.uri = dbus_str(&value, key).into(),
+                KEY_VENDOR => release.vendor = dbus_str(&value, key).into(),
+                KEY_VERSION => release.version = dbus_str(&value, key).into(),
                 other => {
                     eprintln!("unknown release key: {} ({})", other, value.signature());
                 }

@@ -1,7 +1,7 @@
 use crate::dbus_helpers::*;
-use crate::{Client, DBusEntry, DynVariant, Error};
+use crate::{Client, DBusEntry, Error, Release};
 use dbus::arg::RefArg;
-use std::{collections::HashMap, iter::FromIterator};
+use std::iter::FromIterator;
 
 // From libfwupd/fwupd-enums.h
 bitflags! {
@@ -66,9 +66,9 @@ pub struct Device {
     pub created: u64,
     pub device_id: Box<str>,
     pub flags: DeviceFlags,
-    pub guid: Vec<Box<str>>,
-    pub icon: Vec<Box<str>>,
-    pub instance_ids: Vec<Box<str>>,
+    pub guid: Box<[Box<str>]>,
+    pub icon: Box<[Box<str>]>,
+    pub instance_ids: Box<[Box<str>]>,
     pub name: Box<str>,
     pub plugin: Box<str>,
     pub update_error: Option<Box<str>>,
@@ -79,18 +79,23 @@ pub struct Device {
 
 impl Device {
     /// Get a list of all the downgrades possible for thisdevice.
-    pub fn downgrades(&self, client: &Client) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn downgrades(&self, client: &Client) -> Result<Vec<Release>, Error> {
         client.get_downgrades(&self.device_id)
     }
 
     /// Get a list of all the upgrades possible for this device.
-    pub fn upgrades(&self, client: &Client) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn upgrades(&self, client: &Client) -> Result<Vec<Release>, Error> {
         client.get_upgrades(&self.device_id)
     }
 
     /// Gets a list of all the releases for this device.
-    pub fn releases(&self, client: &Client) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn releases(&self, client: &Client) -> Result<Vec<Release>, Error> {
         client.get_releases(&self.device_id)
+    }
+
+    /// Checks if the device is supported by fwupd.
+    pub fn is_supported(&self) -> bool {
+        self.flags.contains(DeviceFlags::SUPPORTED)
     }
 
     /// Determins if the device is updateable or not.
@@ -124,6 +129,7 @@ impl FromIterator<DBusEntry> for Device {
                         .flat_map(|array| array.as_iter().expect("Guid is not an iterator"))
                         .map(|elem| dbus_str(elem, key).into())
                         .collect::<Vec<Box<str>>>()
+                        .into_boxed_slice()
                 }
                 "Icon" => {
                     device.icon = value
@@ -132,6 +138,7 @@ impl FromIterator<DBusEntry> for Device {
                         .flat_map(|array| array.as_iter().expect("Icon is not an iterator"))
                         .map(|elem| dbus_str(elem, key).into())
                         .collect::<Vec<Box<str>>>()
+                        .into_boxed_slice()
                 }
                 "InstanceIds" => {
                     device.instance_ids = value
@@ -140,6 +147,7 @@ impl FromIterator<DBusEntry> for Device {
                         .flat_map(|array| array.as_iter().expect("InstanceIds is not an iterator"))
                         .map(|value| dbus_str(value, key).into())
                         .collect::<Vec<Box<str>>>()
+                        .into_boxed_slice()
                 }
                 "Name" => device.name = dbus_str(&value, key).into(),
                 "Plugin" => device.plugin = dbus_str(&value, key).into(),

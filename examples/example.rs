@@ -41,9 +41,7 @@ fn main_() -> Result<(), Box<dyn Error>> {
             if let Ok(upgrades) = device.upgrades(client) {
                 println!("  upgrades found");
                 for upgrade in upgrades {
-                    for (key, value) in upgrade {
-                        println!("    {}: {:?}", key, value);
-                    }
+                    println!("{:#?}", upgrade);
                 }
             } else {
                 println!("  no updates available");
@@ -52,18 +50,14 @@ fn main_() -> Result<(), Box<dyn Error>> {
             if let Ok(downgrades) = device.downgrades(client) {
                 println!("  downgrades found");
                 for downgrade in downgrades {
-                    for (key, value) in downgrade {
-                        println!("    {}: {:?}", key, value);
-                    }
+                    println!("{:#?}", downgrade);
                 }
             }
 
             if let Ok(releases) = device.releases(client) {
                 println!("   releases found");
                 for release in releases {
-                    for (key, value) in release {
-                        println!("    {}: {:?}", key, value);
-                    }
+                    println!("{:#?}", release);
                 }
             }
         } else {

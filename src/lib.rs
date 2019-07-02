@@ -8,9 +8,11 @@ extern crate shrinkwraprs;
 mod common;
 mod dbus_helpers;
 mod device;
+mod release;
 mod remote;
 
 pub use self::device::*;
+pub use self::release::*;
 pub use self::remote::*;
 
 use dbus::{
@@ -83,10 +85,7 @@ impl Client {
     }
 
     /// Get a list of all the downgrades possible for a specific device.
-    pub fn get_downgrades(
-        &self,
-        device_id: &str,
-    ) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn get_downgrades(&self, device_id: &str) -> Result<Vec<Release>, Error> {
         self.get_device_method("GetDowngrades", device_id)
     }
 
@@ -99,7 +98,7 @@ impl Client {
     }
 
     /// Gets a list of all the releases for a specific device.
-    pub fn get_releases(&self, device_id: &str) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn get_releases(&self, device_id: &str) -> Result<Vec<Release>, Error> {
         self.get_device_method("GetReleases", device_id)
     }
 
@@ -118,7 +117,7 @@ impl Client {
     }
 
     /// Get a list of all the upgrades possible for a specific device.
-    pub fn get_upgrades(&self, device_id: &str) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn get_upgrades(&self, device_id: &str) -> Result<Vec<Release>, Error> {
         self.get_device_method("GetUpgrades", device_id)
     }
 
@@ -251,14 +250,17 @@ impl Client {
         Ok(iter.map(T::from_iter).collect())
     }
 
-    fn get_device_method(
+    fn get_device_method<T: FromIterator<DBusEntry>>(
         &self,
         method: &'static str,
         device_id: &str,
-    ) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
-        self.call_method(method, |m| m.append1(device_id))?
+    ) -> Result<Vec<T>, Error> {
+        let message = self.call_method(method, |m| m.append1(device_id))?;
+        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> = message
             .read1()
-            .map_err(|why| Error::ArgumentMismatch(method, why))
+            .map_err(|why| Error::ArgumentMismatch(method, why))?;
+
+        Ok(iter.map(T::from_iter).collect())
     }
 
     fn get_handle_method<H: IntoRawFd>(

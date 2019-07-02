@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
+extern crate cascade;
+#[macro_use]
 extern crate err_derive;
 #[macro_use]
 extern crate shrinkwraprs;
@@ -39,6 +41,16 @@ const TIMEOUT: i32 = 5000;
 
 pub type DynVariant = Variant<Box<RefArg + 'static>>;
 pub type DBusEntry = (String, DynVariant);
+
+bitflags! {
+    pub struct InstallFlags: u64 {
+        const OFFLINE         = 1 << 0;
+        const ALLOW_REINSTALL = 1 << 1;
+        const ALLOW_OLDER     = 1 << 2;
+        const FORCE           = 1 << 3;
+        const NO_HISTORY      = 1 << 4;
+    }
+}
 
 /// An error that may occur when using the client.
 #[derive(Debug, Error)]
@@ -122,14 +134,40 @@ impl Client {
     }
 
     /// Schedules a firmware to be installed.
-    pub fn install<H: IntoRawFd>(
+    pub fn install<'a, H: IntoRawFd>(
         &self,
         id: &str,
+        reason: &str,
+        filename: &str,
         handle: H,
+        flags: InstallFlags,
     ) -> Result<HashMap<String, DynVariant>, Error> {
         const METHOD: &str = "Install";
 
-        let cb = |m: Message| m.append2(id, OwnedFd::new(handle.into_raw_fd()));
+        let options: Vec<(&str, DynVariant)> = cascade! {
+            opts: Vec::with_capacity(8);
+            ..push(("reason", Variant(Box::new(reason.to_owned()) as Box<dyn RefArg>)));
+            ..push(("filename", Variant(Box::new(filename.to_owned()) as Box<dyn RefArg>)));
+            | if flags.contains(InstallFlags::OFFLINE) {
+                opts.push(("offline", Variant(Box::new(true) as Box<dyn RefArg>)));
+            };
+            | if flags.contains(InstallFlags::ALLOW_OLDER) {
+                opts.push(("allow-older", Variant(Box::new(true) as Box<dyn RefArg>)));
+            };
+            | if flags.contains(InstallFlags::ALLOW_REINSTALL) {
+                opts.push(("allow-reinstall", Variant(Box::new(true) as Box<dyn RefArg>)));
+            };
+            | if flags.contains(InstallFlags::FORCE) {
+                opts.push(("force", Variant(Box::new(true) as Box<dyn RefArg>)));
+            };
+            | if flags.contains(InstallFlags::NO_HISTORY) {
+                opts.push(("no-history", Variant(Box::new(true) as Box<dyn RefArg>)));
+            };
+        };
+
+        let options = Array::new(options);
+
+        let cb = |m: Message| m.append3(id, OwnedFd::new(handle.into_raw_fd()), options);
 
         self.call_method(METHOD, cb)?
             .read1()

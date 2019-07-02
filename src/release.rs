@@ -1,12 +1,7 @@
 use crate::dbus_helpers::*;
-use crate::{Client, DBusEntry};
+use crate::DBusEntry;
 use dbus::arg::RefArg;
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Seek, SeekFrom},
-    iter::FromIterator,
-    path::{Path, PathBuf},
-};
+use std::iter::FromIterator;
 
 bitflags! {
     pub struct ReleaseFlags: u64 {

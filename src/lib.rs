@@ -78,6 +78,11 @@ impl Client {
             .map_err(Error::Connection)
     }
 
+    /// Activate a firmware update on the device.
+    pub fn activate(&self, id: &str) -> Result<(), Error> {
+        self.action_method("Activate", id)
+    }
+
     /// Clears the results of an offline update.
     pub fn clear_results(&self, id: &str) -> Result<(), Error> {
         self.action_method("ClearResults", id)

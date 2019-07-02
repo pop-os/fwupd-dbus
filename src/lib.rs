@@ -5,6 +5,7 @@ extern crate err_derive;
 #[macro_use]
 extern crate shrinkwraprs;
 
+mod common;
 mod dbus_helpers;
 mod device;
 mod remote;

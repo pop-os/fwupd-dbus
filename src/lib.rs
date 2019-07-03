@@ -69,6 +69,7 @@ pub enum Status {
     DeviceErase,
     WaitingForAuth,
     DeviceBusy,
+    Shutdown,
 }
 
 impl From<u8> for Status {
@@ -87,6 +88,7 @@ impl From<u8> for Status {
             9 => DeviceErase,
             10 => WaitingForAuth,
             11 => DeviceBusy,
+            12 => Shutdown,
             _ => {
                 eprintln!("status value {} is out of range", value);
                 Idle
@@ -157,10 +159,7 @@ impl Client {
     }
 
     /// Gets a list of all the past firmware updates.
-    pub fn get_history<H: IntoRawFd>(
-        &self,
-        handle: H,
-    ) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    pub fn get_history<H: IntoRawFd>(&self, handle: H) -> Result<Vec<Device>, Error> {
         self.get_handle_method("GetHistory", handle)
     }
 
@@ -175,12 +174,10 @@ impl Client {
     }
 
     /// Gets the results of an offline update.
-    pub fn get_results(&self, id: &str) -> Result<HashMap<String, DynVariant>, Error> {
-        const METHOD: &str = "GetResults";
-
-        self.call_method(METHOD, |m| m.append1(id))?
-            .read1()
-            .map_err(|why| Error::ArgumentMismatch(METHOD, why))
+    pub fn get_results(&self, id: &str) -> Result<Option<Device>, Error> {
+        let message = self.call_method("GetResults", |m| m.append1(id))?;
+        let iter: Option<Dict<String, Variant<Box<RefArg + 'static>>, _>> = message.get1();
+        Ok(iter.map(Device::from_iter))
     }
 
     /// Get a list of all the upgrades possible for a specific device.
@@ -380,16 +377,19 @@ impl Client {
         Ok(iter.map(T::from_iter).collect())
     }
 
-    fn get_handle_method<H: IntoRawFd>(
+    fn get_handle_method<T: FromIterator<DBusEntry>, H: IntoRawFd>(
         &self,
         method: &'static str,
         handle: H,
-    ) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
+    ) -> Result<Vec<T>, Error> {
         let cb = move |m: Message| m.append1(OwnedFd::new(handle.into_raw_fd()));
 
-        self.call_method(method, cb)?
+        let message = self.call_method(method, cb)?;
+        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> = message
             .read1()
-            .map_err(|why| Error::ArgumentMismatch(method, why))
+            .map_err(|why| Error::ArgumentMismatch(method, why))?;
+
+        Ok(iter.map(T::from_iter).collect())
     }
 
     fn get_property<T: for<'a> Get<'a> + Arg>(&self, property: &'static str) -> Result<T, Error> {

@@ -19,9 +19,11 @@ pub use self::remote::*;
 
 use dbus::{
     self,
-    arg::{Array, Dict, RefArg, Variant},
-    BusType, Connection, ConnectionItem, Message, OwnedFd,
+    arg::{Arg, Array, Dict, Get, RefArg, Variant},
+    BusType, ConnPath, Connection, ConnectionItem, Message, OwnedFd,
 };
+
+use dbus::stdintf::org_freedesktop_dbus::Properties;
 
 use std::{
     collections::HashMap,
@@ -52,6 +54,47 @@ bitflags! {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Status {
+    Unknown,
+    Idle,
+    Loading,
+    Decompressing,
+    DeviceRestart,
+    DeviceWrite,
+    Scheduling,
+    Downloading,
+    DeviceRead,
+    DeviceErase,
+    WaitingForAuth,
+    DeviceBusy,
+}
+
+impl From<u8> for Status {
+    fn from(value: u8) -> Self {
+        use self::Status::*;
+        match value {
+            0 => Unknown,
+            1 => Idle,
+            2 => Loading,
+            3 => Decompressing,
+            4 => DeviceRestart,
+            5 => DeviceWrite,
+            6 => Scheduling,
+            7 => Downloading,
+            8 => DeviceRead,
+            9 => DeviceErase,
+            10 => WaitingForAuth,
+            11 => DeviceBusy,
+            _ => {
+                eprintln!("status value {} is out of range", value);
+                Idle
+            }
+        }
+    }
+}
+
 /// An error that may occur when using the client.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -63,6 +106,8 @@ pub enum Error {
     Call(&'static str, #[error(cause)] dbus::Error),
     #[error(display = "unable to establish dbus connection")]
     Connection(#[error(cause)] dbus::Error),
+    #[error(display = "failed to get property for {}", _0)]
+    GetProperty(&'static str, #[error(cause)] dbus::Error),
     #[error(display = "failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
 }
@@ -86,6 +131,11 @@ impl Client {
     /// Clears the results of an offline update.
     pub fn clear_results(&self, id: &str) -> Result<(), Error> {
         self.action_method("ClearResults", id)
+    }
+
+    /// The version of this daemon.
+    pub fn daemon_version(&self) -> Result<Box<str>, Error> {
+        self.get_property::<String>("DaemonVersion").map(Box::from)
     }
 
     /// Gets details about a local firmware file.
@@ -241,6 +291,22 @@ impl Client {
         Ok(())
     }
 
+    /// The job percentage completion, or 0 for unknown.
+    pub fn percentage(&self) -> Result<u8, Error> {
+        self.get_property::<u32>("Percentage").map(|v| v as u8)
+    }
+
+    /// The daemon status, e.g. **decompressing**.
+    pub fn status(&self) -> Result<Status, Error> {
+        self.get_property::<u32>("Status")
+            .map(|v| Status::from(v as u8))
+    }
+
+    /// If the daemon has been tainted with a third party plugin.
+    pub fn tainted(&self) -> Result<bool, Error> {
+        self.get_property::<bool>("Tainted")
+    }
+
     /// Unlock the device to allow firmware access.
     pub fn unlock(&self, id: &str) -> Result<(), Error> {
         self.action_method("Unlock", id)
@@ -318,6 +384,12 @@ impl Client {
             .map_err(|why| Error::ArgumentMismatch(method, why))
     }
 
+    fn get_property<T: for<'a> Get<'a> + Arg>(&self, property: &'static str) -> Result<T, Error> {
+        self.connection_path()
+            .get::<T>(DBUS_NAME, property)
+            .map_err(|why| Error::GetProperty(property, why))
+    }
+
     fn call_method<F: FnOnce(Message) -> Message>(
         &self,
         method: &'static str,
@@ -330,6 +402,10 @@ impl Client {
 
         self.send_with_reply_and_block(m, TIMEOUT)
             .map_err(|why| Error::Call(method, why))
+    }
+
+    fn connection_path<'a>(&'a self) -> ConnPath<'a, &'a Connection> {
+        self.with_path(DBUS_NAME, DBUS_PATH, TIMEOUT)
     }
 }
 

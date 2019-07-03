@@ -11,7 +11,7 @@ use std::{
 
 fn main() {
     if let Err(why) = main_() {
-        let mut error = format!("application errored: {}", why);
+        let mut error = format!("error: {}", why);
         let mut cause = why.source();
         while let Some(why) = cause {
             error.push_str(&format!("\n    caused by: {}", why));
@@ -32,6 +32,13 @@ fn main_() -> Result<(), Box<dyn Error>> {
 
     // Create a new dbus client connection.
     let client = &Client::new()?;
+
+    println!("Version: {}", client.daemon_version()?);
+    println!("Status: {:?}", client.status()?);
+    println!("Tainted: {}", client.tainted()?);
+    if let Ok(percent) = client.percentage() {
+        println!("Percentage; {}", percent);
+    }
 
     // Fetch a list of supported devices.
     for device in client.get_devices()? {

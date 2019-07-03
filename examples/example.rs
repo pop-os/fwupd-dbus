@@ -105,6 +105,18 @@ fn listen_in_background(cancellable: Arc<AtomicBool>) {
                     Signal::DeviceRemoved(device) => {
                         println!("device added: {:?}", device);
                     }
+                    Signal::PropertiesChanged {
+                        interface,
+                        changed,
+                        invalidated,
+                    } => {
+                        println!(
+                            "Properties of {} changed:\n \
+                             changed: {:?}\n \
+                             invalidated: {:?}",
+                            interface, changed, invalidated
+                        );
+                    }
                 }
             }
         }

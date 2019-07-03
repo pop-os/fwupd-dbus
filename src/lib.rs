@@ -266,6 +266,14 @@ impl Client {
                     "DeviceRemoved" => {
                         read_signal(signal, "DeviceRemoved").map(Signal::DeviceRemoved)
                     }
+                    "PropertiesChanged" => signal
+                        .read3::<String, HashMap<String, DynVariant>, Vec<String>>()
+                        .map_err(|why| Error::ArgumentMismatch("PropertiesChanged", why))
+                        .map(|values| Signal::PropertiesChanged {
+                            interface: values.0.into(),
+                            changed: values.1,
+                            invalidated: values.2,
+                        }),
                     _ => return None,
                 };
 
@@ -419,4 +427,10 @@ pub enum Signal {
     DeviceChanged(Device),
     /// A device has been removed.
     DeviceRemoved(Device),
+    /// Triggers when a property has changed.
+    PropertiesChanged {
+        interface: Box<str>,
+        changed: HashMap<String, DynVariant>,
+        invalidated: Vec<String>,
+    },
 }

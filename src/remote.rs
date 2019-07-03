@@ -1,6 +1,4 @@
-use crate::common::*;
-use crate::dbus_helpers::*;
-use crate::{Client, DBusEntry};
+use crate::{common::*, dbus_helpers::*, Client, DBusEntry};
 use dbus::arg::RefArg;
 use std::{
     fs::{self, File, OpenOptions},
@@ -35,6 +33,9 @@ pub enum UpdateError {
     Truncate(#[error(cause)] io::Error),
 }
 
+#[derive(Clone, Debug, Default, Shrinkwrap)]
+pub struct RemoteId(pub(crate) Box<str>);
+
 /// Information about an available fwupd remote.
 #[derive(Debug, Default)]
 pub struct Remote {
@@ -50,7 +51,7 @@ pub struct Remote {
     pub modification_time: u64,
     pub password: Option<Box<str>>,
     pub priority: i16,
-    pub remote_id: Box<str>,
+    pub remote_id: RemoteId,
     pub report_uri: Option<Box<str>>,
     pub title: Box<str>,
     pub uri: Option<Box<str>>,
@@ -71,7 +72,7 @@ impl Remote {
             if let Some(file) = self.update_file(http_client, uri)? {
                 let sig = self.update_signature(http_client, uri)?;
                 client
-                    .update_metadata(&self.remote_id, file, sig)
+                    .update_metadata(&self, file, sig)
                     .map_err(UpdateError::Client)?;
             }
         }
@@ -98,12 +99,9 @@ impl Remote {
                 .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
 
             let checksum = self.checksum.as_ref().unwrap();
-            let checksum_matched = crate::common::validate_checksum(
-                &mut file,
-                checksum,
-                crate::common::checksum_guess_kind(checksum),
-            )
-            .map_err(|why| UpdateError::Read(why, cache.to_path_buf()))?;
+            let checksum_matched =
+                validate_checksum(&mut file, checksum, checksum_guess_kind(checksum))
+                    .map_err(|why| UpdateError::Read(why, cache.to_path_buf()))?;
 
             if checksum_matched {
                 return Ok(None);
@@ -162,6 +160,12 @@ impl Remote {
     }
 }
 
+impl AsRef<RemoteId> for Remote {
+    fn as_ref(&self) -> &RemoteId {
+        &self.remote_id
+    }
+}
+
 impl FromIterator<DBusEntry> for Remote {
     fn from_iter<T>(iter: T) -> Self
     where
@@ -191,7 +195,7 @@ impl FromIterator<DBusEntry> for Remote {
 
                     remote.priority = dbus_i64(&value, key) as i16;
                 }
-                KEY_REMOTE_ID => remote.remote_id = dbus_str(&value, key).into(),
+                KEY_REMOTE_ID => remote.remote_id = RemoteId(dbus_str(&value, key).into()),
                 "ReportUri" => remote.report_uri = Some(dbus_str(&value, key).into()),
                 "Title" => remote.title = dbus_str(&value, key).into(),
                 "Type" => remote._type = dbus_u64(&value, key) as u16,

@@ -126,13 +126,13 @@ impl Client {
     }
 
     /// Activate a firmware update on the device.
-    pub fn activate(&self, id: &str) -> Result<(), Error> {
-        self.action_method("Activate", id)
+    pub fn activate<D: AsRef<DeviceId>>(&self, id: D) -> Result<(), Error> {
+        self.action_method("Activate", id.as_ref().as_ref())
     }
 
     /// Clears the results of an offline update.
-    pub fn clear_results(&self, id: &str) -> Result<(), Error> {
-        self.action_method("ClearResults", id)
+    pub fn clear_results<D: AsRef<DeviceId>>(&self, id: D) -> Result<(), Error> {
+        self.action_method("ClearResults", id.as_ref().as_ref())
     }
 
     /// The version of this daemon.
@@ -264,13 +264,25 @@ impl Client {
     }
 
     /// Modifies a device in some way.
-    pub fn modify_device(&self, device_id: &str, key: &str, value: &str) -> Result<(), Error> {
+    pub fn modify_device<D: AsRef<DeviceId>>(
+        &self,
+        device_id: D,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Error> {
+        let device_id: &str = device_id.as_ref().as_ref();
         self.call_method("ModifyDevice", |m| m.append3(device_id, key, value))?;
         Ok(())
     }
 
     /// Modifies a remote in some way.
-    pub fn modify_remote(&self, remote_id: &str, key: &str, value: &str) -> Result<(), Error> {
+    pub fn modify_remote<R: AsRef<RemoteId>>(
+        &self,
+        remote_id: R,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Error> {
+        let remote_id: &str = remote_id.as_ref().as_ref();
         self.call_method("ModifyRemote", |m| m.append3(remote_id, key, value))?;
         Ok(())
     }
@@ -291,7 +303,8 @@ impl Client {
     }
 
     /// Gets the results of an offline update.
-    pub fn results(&self, id: &str) -> Result<Option<Device>, Error> {
+    pub fn results<D: AsRef<DeviceId>>(&self, id: D) -> Result<Option<Device>, Error> {
+        let id = id.as_ref().as_ref();
         let message = self.call_method("GetResults", |m| m.append1(id))?;
         let iter: Option<Dict<String, Variant<Box<RefArg + 'static>>, _>> = message.get1();
         Ok(iter.map(Device::from_iter))
@@ -309,17 +322,18 @@ impl Client {
     }
 
     /// Unlock the device to allow firmware access.
-    pub fn unlock(&self, id: &str) -> Result<(), Error> {
-        self.action_method("Unlock", id)
+    pub fn unlock<D: AsRef<DeviceId>>(&self, id: D) -> Result<(), Error> {
+        self.action_method("Unlock", id.as_ref().as_ref())
     }
 
     /// Adds AppStream resource information from a session client.
-    pub fn update_metadata<D: IntoRawFd, S: IntoRawFd>(
+    pub fn update_metadata<D: IntoRawFd, S: IntoRawFd, R: AsRef<RemoteId>>(
         &self,
-        remote_id: &str,
+        remote_id: R,
         data: D,
         signature: S,
     ) -> Result<(), Error> {
+        let remote_id: &str = remote_id.as_ref().as_ref();
         let cb = |m: Message| {
             m.append3(
                 remote_id,
@@ -339,13 +353,13 @@ impl Client {
 
     /// Verifies firmware on a device by reading it back and performing
     /// a cryptographic hash, typically SHA1.
-    pub fn verify(&self, id: &str) -> Result<(), Error> {
-        self.action_method("Verify", id)
+    pub fn verify<D: AsRef<DeviceId>>(&self, id: D) -> Result<(), Error> {
+        self.action_method("Verify", id.as_ref().as_ref())
     }
 
     /// Updates the cryptographic hash stored for a device.
-    pub fn verify_update(&self, id: &str) -> Result<(), Error> {
-        self.action_method("VerifyUpdate", id)
+    pub fn verify_update<D: AsRef<DeviceId>>(&self, id: D) -> Result<(), Error> {
+        self.action_method("VerifyUpdate", id.as_ref().as_ref())
     }
 
     fn action_method(&self, method: &'static str, id: &str) -> Result<(), Error> {

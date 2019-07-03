@@ -31,21 +31,21 @@ fn main_() -> Result<(), Box<dyn Error>> {
     listen_in_background(cancellable.clone());
 
     // Create a new dbus client connection.
-    let client = &Client::new()?;
+    let fwupd = &Client::new()?;
 
-    println!("Version: {}", client.daemon_version()?);
-    println!("Status: {:?}", client.status()?);
-    println!("Tainted: {}", client.tainted()?);
-    if let Ok(percent) = client.percentage() {
+    println!("Version: {}", fwupd.daemon_version()?);
+    println!("Status: {:?}", fwupd.status()?);
+    println!("Tainted: {}", fwupd.tainted()?);
+    if let Ok(percent) = fwupd.percentage() {
         println!("Percentage; {}", percent);
     }
 
     // Fetch a list of supported devices.
-    for device in client.devices()? {
+    for device in fwupd.devices()? {
         println!("Device: {} {}", device.vendor, device.name);
 
         if device.is_updateable() {
-            if let Ok(upgrades) = client.upgrades(&device) {
+            if let Ok(upgrades) = fwupd.upgrades(&device) {
                 println!("  upgrades found");
                 for upgrade in upgrades {
                     println!("{:#?}", upgrade);
@@ -54,14 +54,14 @@ fn main_() -> Result<(), Box<dyn Error>> {
                 println!("  no updates available");
             }
 
-            if let Ok(downgrades) = client.downgrades(&device) {
+            if let Ok(downgrades) = fwupd.downgrades(&device) {
                 println!("  downgrades found");
                 for downgrade in downgrades {
                     println!("{:#?}", downgrade);
                 }
             }
 
-            if let Ok(releases) = client.releases(&device) {
+            if let Ok(releases) = fwupd.releases(&device) {
                 println!("   releases found");
                 for release in releases {
                     println!("{:#?}", release);
@@ -75,10 +75,10 @@ fn main_() -> Result<(), Box<dyn Error>> {
     let http_client = &reqwest::Client::new();
 
     // Fetch a list of remotes, and update them.
-    for remote in client.remotes()? {
+    for remote in fwupd.remotes()? {
         println!("{:#?}", remote);
 
-        remote.update_metadata(client, http_client)?;
+        remote.update_metadata(fwupd, http_client)?;
     }
 
     // Stop listening to signals in the background.
@@ -89,9 +89,9 @@ fn main_() -> Result<(), Box<dyn Error>> {
 
 fn listen_in_background(cancellable: Arc<AtomicBool>) {
     thread::spawn(move || {
-        if let Ok(client) = Client::new() {
+        if let Ok(fwupd) = Client::new() {
             // Listen for signals received by the daemon.
-            for signal in client.listen_signals(cancellable) {
+            for signal in fwupd.listen_signals(cancellable) {
                 match signal {
                     Signal::Changed => {
                         println!("changed");

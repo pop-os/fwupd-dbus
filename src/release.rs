@@ -1,6 +1,4 @@
-use crate::common::*;
-use crate::dbus_helpers::*;
-use crate::DBusEntry;
+use crate::{common::*, dbus_helpers::*, DBusEntry, RemoteId};
 use dbus::arg::RefArg;
 use std::iter::FromIterator;
 
@@ -35,6 +33,9 @@ impl Default for TrustFlags {
     }
 }
 
+#[derive(Clone, Debug, Default, Shrinkwrap)]
+pub struct ReleaseUri(Box<str>);
+
 /// Information about an available fwupd remote.
 #[derive(Debug, Default)]
 pub struct Release {
@@ -51,13 +52,13 @@ pub struct Release {
     pub license: Box<str>,
     pub name: Box<str>,
     pub protocol: Box<str>,
-    pub remote_id: Box<str>,
+    pub remote_id: RemoteId,
     pub size: u64,
     pub source_url: Box<str>,
     pub summary: Box<str>,
     pub trust_flags: TrustFlags,
     pub update_message: Box<str>,
-    pub uri: Box<str>,
+    pub uri: ReleaseUri,
     pub vendor: Box<str>,
     pub version: Box<str>,
 }
@@ -102,7 +103,7 @@ impl FromIterator<DBusEntry> for Release {
                 KEY_LICENSE => release.license = dbus_str(&value, key).into(),
                 // KEY_METADATA => (),
                 KEY_PROTOCOL => release.protocol = dbus_str(&value, key).into(),
-                KEY_REMOTE_ID => release.remote_id = dbus_str(&value, key).into(),
+                KEY_REMOTE_ID => release.remote_id = RemoteId(dbus_str(&value, key).into()),
                 KEY_SIZE => release.size = dbus_u64(&value, key),
                 KEY_SOURCE_URL => release.source_url = dbus_str(&value, key).into(),
                 KEY_SUMMARY => release.summary = dbus_str(&value, key).into(),
@@ -110,7 +111,7 @@ impl FromIterator<DBusEntry> for Release {
                     release.trust_flags = TrustFlags::from_bits_truncate(dbus_u64(&value, key))
                 }
                 KEY_UPDATE_MESSAGE => release.update_message = dbus_str(&value, key).into(),
-                KEY_URI => release.uri = dbus_str(&value, key).into(),
+                KEY_URI => release.uri = ReleaseUri(dbus_str(&value, key).into()),
                 KEY_VENDOR => release.vendor = dbus_str(&value, key).into(),
                 KEY_VERSION => release.version = dbus_str(&value, key).into(),
                 other => {

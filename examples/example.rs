@@ -41,11 +41,11 @@ fn main_() -> Result<(), Box<dyn Error>> {
     }
 
     // Fetch a list of supported devices.
-    for device in client.get_devices()? {
+    for device in client.devices()? {
         println!("Device: {} {}", device.vendor, device.name);
 
         if device.is_updateable() {
-            if let Ok(upgrades) = device.upgrades(client) {
+            if let Ok(upgrades) = client.upgrades(&device) {
                 println!("  upgrades found");
                 for upgrade in upgrades {
                     println!("{:#?}", upgrade);
@@ -54,14 +54,14 @@ fn main_() -> Result<(), Box<dyn Error>> {
                 println!("  no updates available");
             }
 
-            if let Ok(downgrades) = device.downgrades(client) {
+            if let Ok(downgrades) = client.downgrades(&device) {
                 println!("  downgrades found");
                 for downgrade in downgrades {
                     println!("{:#?}", downgrade);
                 }
             }
 
-            if let Ok(releases) = device.releases(client) {
+            if let Ok(releases) = client.releases(&device) {
                 println!("   releases found");
                 for release in releases {
                     println!("{:#?}", release);
@@ -75,7 +75,7 @@ fn main_() -> Result<(), Box<dyn Error>> {
     let http_client = &reqwest::Client::new();
 
     // Fetch a list of remotes, and update them.
-    for remote in client.get_remotes()? {
+    for remote in client.remotes()? {
         println!("{:#?}", remote);
 
         remote.update_metadata(client, http_client)?;

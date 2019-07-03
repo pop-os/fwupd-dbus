@@ -141,7 +141,7 @@ impl Client {
     }
 
     /// Gets details about a local firmware file.
-    pub fn get_details<H: IntoRawFd>(
+    pub fn details<H: IntoRawFd>(
         &self,
         handle: H,
     ) -> Result<Vec<HashMap<String, DynVariant>>, Error> {
@@ -149,46 +149,24 @@ impl Client {
     }
 
     /// Gets a list of all the devices that are supported.
-    pub fn get_devices(&self) -> Result<Vec<Device>, Error> {
+    pub fn devices(&self) -> Result<Vec<Device>, Error> {
         self.get_method("GetDevices")
     }
 
     /// Get a list of all the downgrades possible for a specific device.
-    pub fn get_downgrades(&self, device_id: &str) -> Result<Vec<Release>, Error> {
-        self.get_device_method("GetDowngrades", device_id)
+    pub fn downgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
+        self.get_device_method("GetDowngrades", device_id.as_ref().as_ref())
     }
 
     /// Gets a list of all the past firmware updates.
-    pub fn get_history<H: IntoRawFd>(&self, handle: H) -> Result<Vec<Device>, Error> {
+    pub fn history<H: IntoRawFd>(&self, handle: H) -> Result<Vec<Device>, Error> {
         self.get_handle_method("GetHistory", handle)
     }
 
-    /// Gets a list of all the releases for a specific device.
-    pub fn get_releases(&self, device_id: &str) -> Result<Vec<Release>, Error> {
-        self.get_device_method("GetReleases", device_id)
-    }
-
-    /// Gets the list of remotes.
-    pub fn get_remotes(&self) -> Result<Vec<Remote>, Error> {
-        self.get_method("GetRemotes")
-    }
-
-    /// Gets the results of an offline update.
-    pub fn get_results(&self, id: &str) -> Result<Option<Device>, Error> {
-        let message = self.call_method("GetResults", |m| m.append1(id))?;
-        let iter: Option<Dict<String, Variant<Box<RefArg + 'static>>, _>> = message.get1();
-        Ok(iter.map(Device::from_iter))
-    }
-
-    /// Get a list of all the upgrades possible for a specific device.
-    pub fn get_upgrades(&self, device_id: &str) -> Result<Vec<Release>, Error> {
-        self.get_device_method("GetUpgrades", device_id)
-    }
-
     /// Schedules a firmware to be installed.
-    pub fn install<'a, H: IntoRawFd>(
+    pub fn install<'a, D: AsRef<DeviceId>, H: IntoRawFd>(
         &self,
-        id: &str,
+        id: D,
         reason: &str,
         filename: &str,
         handle: H,
@@ -219,6 +197,7 @@ impl Client {
 
         let options = Array::new(options);
 
+        let id: &str = id.as_ref().as_ref();
         let cb = |m: Message| m.append3(id, OwnedFd::new(handle.into_raw_fd()), options);
 
         self.call_method(METHOD, cb)?
@@ -301,6 +280,23 @@ impl Client {
         self.get_property::<u32>("Percentage").map(|v| v as u8)
     }
 
+    /// Gets a list of all the releases for a specific device.
+    pub fn releases<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
+        self.get_device_method("GetReleases", device_id.as_ref().as_ref())
+    }
+
+    /// Gets the list of remotes.
+    pub fn remotes(&self) -> Result<Vec<Remote>, Error> {
+        self.get_method("GetRemotes")
+    }
+
+    /// Gets the results of an offline update.
+    pub fn results(&self, id: &str) -> Result<Option<Device>, Error> {
+        let message = self.call_method("GetResults", |m| m.append1(id))?;
+        let iter: Option<Dict<String, Variant<Box<RefArg + 'static>>, _>> = message.get1();
+        Ok(iter.map(Device::from_iter))
+    }
+
     /// The daemon status, e.g. **decompressing**.
     pub fn status(&self) -> Result<Status, Error> {
         self.get_property::<u32>("Status")
@@ -334,6 +330,11 @@ impl Client {
 
         self.call_method("UpdateMetadata", cb)?;
         Ok(())
+    }
+
+    /// Get a list of all the upgrades possible for a specific device.
+    pub fn upgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
+        self.get_device_method("GetUpgrades", device_id.as_ref().as_ref())
     }
 
     /// Verifies firmware on a device by reading it back and performing

@@ -1,6 +1,6 @@
 use crate::common::*;
 use crate::dbus_helpers::*;
-use crate::{Client, DBusEntry, Error, Release};
+use crate::DBusEntry;
 use dbus::arg::RefArg;
 use std::iter::FromIterator;
 
@@ -86,13 +86,22 @@ impl From<u32> for UpdateState {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct DeviceId(Box<str>);
+
+impl AsRef<str> for DeviceId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
 /// A device that is potentially-supported by fwupd.
 #[derive(Debug, Default)]
 pub struct Device {
     pub checksum: Option<Box<str>>,
     pub created: u64,
     pub description: Option<Box<str>>,
-    pub device_id: Box<str>,
+    pub device_id: DeviceId,
     pub flags: DeviceFlags,
     pub flashes_left: Option<u32>,
     pub guid: Box<[Box<str>]>,
@@ -101,7 +110,7 @@ pub struct Device {
     pub instance_ids: Box<[Box<str>]>,
     pub modified: Option<u64>,
     pub name: Box<str>,
-    pub parent_device_id: Option<Box<str>>,
+    pub parent_device_id: Option<DeviceId>,
     pub plugin: Box<str>,
     pub serial: Option<Box<str>>,
     pub summary: Option<Box<str>>,
@@ -116,21 +125,6 @@ pub struct Device {
 }
 
 impl Device {
-    /// Get a list of all the downgrades possible for thisdevice.
-    pub fn downgrades(&self, client: &Client) -> Result<Vec<Release>, Error> {
-        client.get_downgrades(&self.device_id)
-    }
-
-    /// Get a list of all the upgrades possible for this device.
-    pub fn upgrades(&self, client: &Client) -> Result<Vec<Release>, Error> {
-        client.get_upgrades(&self.device_id)
-    }
-
-    /// Gets a list of all the releases for this device.
-    pub fn releases(&self, client: &Client) -> Result<Vec<Release>, Error> {
-        client.get_releases(&self.device_id)
-    }
-
     /// Checks if the device is supported by fwupd.
     pub fn is_supported(&self) -> bool {
         self.flags.contains(DeviceFlags::SUPPORTED)
@@ -147,6 +141,12 @@ impl Device {
     }
 }
 
+impl AsRef<DeviceId> for Device {
+    fn as_ref(&self) -> &DeviceId {
+        &self.device_id
+    }
+}
+
 impl FromIterator<DBusEntry> for Device {
     fn from_iter<T>(iter: T) -> Self
     where
@@ -160,7 +160,7 @@ impl FromIterator<DBusEntry> for Device {
                 KEY_CHECKSUM => device.checksum = Some(dbus_str(&value, key).into()),
                 KEY_CREATED => device.created = dbus_u64(&value, key).into(),
                 KEY_DESCRIPTION => device.description = Some(dbus_str(&value, key).into()),
-                KEY_DEVICE_ID => device.device_id = dbus_str(&value, key).into(),
+                KEY_DEVICE_ID => device.device_id = DeviceId(dbus_str(&value, key).into()),
                 KEY_FLAGS => device.flags = DeviceFlags::from_bits_truncate(dbus_u64(&value, key)),
                 KEY_FLASHES_LEFT => device.flashes_left = Some(dbus_u64(&value, key) as u32),
                 KEY_GUID => {
@@ -196,7 +196,7 @@ impl FromIterator<DBusEntry> for Device {
                 KEY_MODIFIED => device.modified = Some(dbus_u64(&value, key)),
                 KEY_NAME => device.name = dbus_str(&value, key).into(),
                 KEY_PARENT_DEVICE_ID => {
-                    device.parent_device_id = Some(dbus_str(&value, key).into())
+                    device.parent_device_id = Some(DeviceId(dbus_str(&value, key).into()))
                 }
                 KEY_PLUGIN => device.plugin = dbus_str(&value, key).into(),
                 KEY_SERIAL => device.serial = Some(dbus_str(&value, key).into()),

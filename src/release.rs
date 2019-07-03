@@ -33,9 +33,6 @@ impl Default for TrustFlags {
     }
 }
 
-#[derive(Clone, Debug, Default, Shrinkwrap)]
-pub struct ReleaseUri(Box<str>);
-
 /// Information about an available fwupd remote.
 #[derive(Debug, Default)]
 pub struct Release {
@@ -58,9 +55,15 @@ pub struct Release {
     pub summary: Box<str>,
     pub trust_flags: TrustFlags,
     pub update_message: Box<str>,
-    pub uri: ReleaseUri,
+    pub uri: Box<str>,
     pub vendor: Box<str>,
     pub version: Box<str>,
+}
+
+impl AsRef<RemoteId> for Release {
+    fn as_ref(&self) -> &RemoteId {
+        &self.remote_id
+    }
 }
 
 impl FromIterator<DBusEntry> for Release {
@@ -111,7 +114,7 @@ impl FromIterator<DBusEntry> for Release {
                     release.trust_flags = TrustFlags::from_bits_truncate(dbus_u64(&value, key))
                 }
                 KEY_UPDATE_MESSAGE => release.update_message = dbus_str(&value, key).into(),
-                KEY_URI => release.uri = ReleaseUri(dbus_str(&value, key).into()),
+                KEY_URI => release.uri = dbus_str(&value, key).into(),
                 KEY_VENDOR => release.vendor = dbus_str(&value, key).into(),
                 KEY_VERSION => release.version = dbus_str(&value, key).into(),
                 other => {

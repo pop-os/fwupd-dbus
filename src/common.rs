@@ -1,6 +1,7 @@
 use crypto_hash::{Algorithm, Hasher};
 use hex_view::HexView;
 use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 
 /// Based on libfwupd/fwupd-common.c
 pub fn checksum_guess_kind(checksum: &str) -> Algorithm {
@@ -13,6 +14,21 @@ pub fn checksum_guess_kind(checksum: &str) -> Algorithm {
     }
 }
 
+const ALGORITHMS: &[Algorithm] = &[Algorithm::SHA512, Algorithm::SHA256, Algorithm::SHA1];
+
+/// Find the best checksum available for an array of checksums.
+pub fn find_best_checksum<S: AsRef<str>>(checksums: &[S]) -> Option<(&str, Algorithm)> {
+    for &algorithm in ALGORITHMS {
+        for checksum in checksums {
+            if algorithm == checksum_guess_kind(checksum.as_ref()) {
+                return Some((checksum.as_ref(), algorithm));
+            }
+        }
+    }
+
+    None
+}
+
 pub fn validate_checksum<R: Read>(
     data: &mut R,
     checksum: &str,
@@ -22,6 +38,13 @@ pub fn validate_checksum<R: Read>(
     io::copy(data, &mut hasher)?;
     let digest = format!("{:x}", HexView::from(hasher.finish().as_slice()));
     Ok(checksum == digest.as_str())
+}
+
+pub fn place_in_cache(file: &Path) -> PathBuf {
+    xdg::BaseDirectories::with_prefix("fwupd-client")
+        .expect("failed to get XDG base directories")
+        .place_cache_file(file)
+        .expect(&format!("failed to place {:?} in cache", file))
 }
 
 pub const KEY_APPSTREAM_ID: &str = "AppstreamId"; // s

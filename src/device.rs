@@ -86,14 +86,8 @@ impl From<u32> for UpdateState {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Shrinkwrap)]
 pub struct DeviceId(Box<str>);
-
-impl AsRef<str> for DeviceId {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
 
 /// A device that is potentially-supported by fwupd.
 #[derive(Debug, Default)]
@@ -125,19 +119,34 @@ pub struct Device {
 }
 
 impl Device {
+    /// Check if the given `DeviceFlag` is set.
+    pub fn has_flag(&self, flags: DeviceFlags) -> bool {
+        self.flags.contains(flags)
+    }
+
+    /// Returns true if a GUID match was found.
+    pub fn has_guid(&self, guid: &str) -> bool {
+        self.guid.iter().any(|g| g.as_ref() == guid)
+    }
+
     /// Checks if the device is supported by fwupd.
     pub fn is_supported(&self) -> bool {
-        self.flags.contains(DeviceFlags::SUPPORTED)
+        self.has_flag(DeviceFlags::SUPPORTED)
     }
 
     /// Determins if the device is updateable or not.
     pub fn is_updateable(&self) -> bool {
-        self.flags.contains(DeviceFlags::UPDATABLE)
+        self.has_flag(DeviceFlags::UPDATABLE)
     }
 
     /// Checks if the device requires a reboot.
     pub fn needs_reboot(&self) -> bool {
-        self.flags.contains(DeviceFlags::NEEDS_REBOOT)
+        self.has_flag(DeviceFlags::NEEDS_REBOOT)
+    }
+
+    /// Check if the device must be updated offline.
+    pub fn only_offline(&self) -> bool {
+        self.has_flag(DeviceFlags::ONLY_OFFLINE)
     }
 }
 

@@ -26,9 +26,13 @@ use dbus::{
 use dbus::stdintf::org_freedesktop_dbus::Properties;
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
+    fs::{File, OpenOptions},
+    io::{self, Seek, SeekFrom},
     iter::FromIterator,
     os::unix::io::IntoRawFd,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -45,7 +49,7 @@ pub type DynVariant = Variant<Box<RefArg + 'static>>;
 pub type DBusEntry = (String, DynVariant);
 
 bitflags! {
-    pub struct InstallFlags: u64 {
+    pub struct InstallFlags: u8 {
         const OFFLINE         = 1 << 0;
         const ALLOW_REINSTALL = 1 << 1;
         const ALLOW_OLDER     = 1 << 2;
@@ -108,10 +112,26 @@ pub enum Error {
     Call(&'static str, #[error(cause)] dbus::Error),
     #[error(display = "unable to establish dbus connection")]
     Connection(#[error(cause)] dbus::Error),
+    #[error(display = "the remote firmware which was downloaded has an invalid checksum")]
+    FirmwareChecksumMismatch,
+    #[error(display = "failed to copy firmware file from remote")]
+    FirmwareCopy(#[error(case)] reqwest::Error),
+    #[error(display = "failed to create firmware file in user cache")]
+    FirmwareCreate(#[error(cause)] io::Error),
+    #[error(display = "failed to GET firmware file from remote")]
+    FirmwareGet(#[error(cause)] reqwest::Error),
+    #[error(display = "failed to open firmware file")]
+    FirmwareOpen(#[error(cause)] io::Error),
+    #[error(display = "failed to read firmware file")]
+    FirmwareRead(#[error(cause)] io::Error),
+    #[error(display = "failed to seek to beginning of firmware file")]
+    FirmwareSeek(#[error(cause)] io::Error),
     #[error(display = "failed to get property for {}", _0)]
     GetProperty(&'static str, #[error(cause)] dbus::Error),
     #[error(display = "failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
+    #[error(display = "remote not found")]
+    RemoteNotFound,
 }
 
 /// A DBus client for interacting with the fwupd daemon.
@@ -158,6 +178,81 @@ impl Client {
         self.get_device_method("GetDowngrades", device_id.as_ref().as_ref())
     }
 
+    pub fn update_device_with_release(
+        &self,
+        client: &reqwest::Client,
+        device: &Device,
+        release: &Release,
+        mut flags: InstallFlags,
+    ) -> Result<(), Error> {
+        let remote = self.remote(release)?;
+
+        // Local and directory remotes already have the firmware.
+        let filename: Option<Cow<'_, Path>> = match remote.kind {
+            RemoteKind::Local => Some(Cow::Owned(
+                Path::new(remote.filename_cache.as_ref())
+                    .parent()
+                    .expect("remote filename cache without parent")
+                    .join(Path::new(release.uri.as_ref())),
+            )),
+            RemoteKind::Directory => Some(Cow::Borrowed(Path::new(&release.uri[7..]))),
+            _ => None,
+        };
+
+        if let Some(filename) = filename {
+            self.install(&device, "(user)", &filename, None::<File>, flags)?;
+            return Ok(());
+        }
+
+        // Create URI, substituting if required.
+        let uri = remote.firmware_uri(&release.uri);
+
+        let mut req_builder = client.get(uri.as_ref());
+
+        // Set the username and password.
+        if let Some(ref username) = remote.username {
+            req_builder = req_builder.basic_auth(username, remote.password.as_ref());
+        }
+
+        let file_path = common::place_in_cache(Path::new(uri.as_ref()));
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&file_path)
+            .map_err(Error::FirmwareCreate)?;
+
+        eprintln!("downloading {} for {}...", release.version, device.name);
+        req_builder
+            .send()
+            .map_err(Error::FirmwareGet)?
+            .error_for_status()
+            .map_err(Error::FirmwareGet)?
+            .copy_to(&mut file)
+            .map_err(Error::FirmwareCopy)?;
+
+        file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+
+        if let Some((checksum, algorithm)) = common::find_best_checksum(&release.checksums) {
+            let checksum_matched = common::validate_checksum(&mut file, checksum, algorithm)
+                .map_err(Error::FirmwareRead)?;
+
+            if !checksum_matched {
+                return Err(Error::FirmwareChecksumMismatch);
+            }
+        }
+
+        file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+
+        if device.only_offline() {
+            flags |= InstallFlags::OFFLINE;
+        }
+
+        self.install(&device, "(user)", &file_path, Some(file), flags)?;
+
+        Ok(())
+    }
+
     /// Gets a list of all the past firmware updates.
     pub fn history<H: IntoRawFd>(&self, handle: H) -> Result<Vec<Device>, Error> {
         self.get_handle_method("GetHistory", handle)
@@ -168,11 +263,25 @@ impl Client {
         &self,
         id: D,
         reason: &str,
-        filename: &str,
-        handle: H,
+        filename: &Path,
+        handle: Option<H>,
         flags: InstallFlags,
     ) -> Result<HashMap<String, DynVariant>, Error> {
         const METHOD: &str = "Install";
+
+        let fd = match handle {
+            Some(handle) => handle.into_raw_fd(),
+            None => OpenOptions::new()
+                .read(true)
+                .open(filename)
+                .map_err(Error::FirmwareOpen)?
+                .into_raw_fd(),
+        };
+
+        let filename = filename
+            .as_os_str()
+            .to_str()
+            .expect("filename is not UTF-8");
 
         let options: Vec<(&str, DynVariant)> = cascade! {
             opts: Vec::with_capacity(8);
@@ -198,7 +307,7 @@ impl Client {
         let options = Array::new(options);
 
         let id: &str = id.as_ref().as_ref();
-        let cb = |m: Message| m.append3(id, OwnedFd::new(handle.into_raw_fd()), options);
+        let cb = |m: Message| m.append3(id, OwnedFd::new(fd), options);
 
         self.call_method(METHOD, cb)?
             .read1()
@@ -297,6 +406,14 @@ impl Client {
         self.get_device_method("GetReleases", device_id.as_ref().as_ref())
     }
 
+    /// Find the remote with the given ID.
+    pub fn remote<D: AsRef<RemoteId>>(&self, id: D) -> Result<Remote, Error> {
+        self.remotes()?
+            .into_iter()
+            .find(|remote| &remote.remote_id == id.as_ref())
+            .ok_or(Error::RemoteNotFound)
+    }
+
     /// Gets the list of remotes.
     pub fn remotes(&self) -> Result<Vec<Remote>, Error> {
         self.get_method("GetRemotes")
@@ -304,7 +421,7 @@ impl Client {
 
     /// Gets the results of an offline update.
     pub fn results<D: AsRef<DeviceId>>(&self, id: D) -> Result<Option<Device>, Error> {
-        let id = id.as_ref().as_ref();
+        let id: &str = id.as_ref().as_ref();
         let message = self.call_method("GetResults", |m| m.append1(id))?;
         let iter: Option<Dict<String, Variant<Box<RefArg + 'static>>, _>> = message.get1();
         Ok(iter.map(Device::from_iter))
@@ -448,4 +565,47 @@ pub enum Signal {
         changed: HashMap<String, DynVariant>,
         invalidated: Vec<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn download_remote() -> Remote {
+        Remote {
+            enabled: true,
+            kind: RemoteKind::Download,
+            keyring: KeyringKind::GPG,
+            firmware_base_uri: Some("https://my.fancy.cdn/".into()),
+            uri: Some("https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz".into()),
+            ..Default::default()
+        }
+    }
+
+    fn nopath_remote() -> Remote {
+        Remote {
+            enabled: true,
+            kind: RemoteKind::Download,
+            keyring: KeyringKind::GPG,
+            uri: Some("https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn remote_baseuri() {
+        let remote = download_remote();
+        let firmware_uri = remote.firmware_uri("http://bbc.co.uk/firmware.cab");
+        assert_eq!(firmware_uri.as_ref(), "https://my.fancy.cdn/firmware.cab")
+    }
+
+    #[test]
+    fn remote_nopath() {
+        let remote = nopath_remote();
+        let firmware_uri = remote.firmware_uri("firmware.cab");
+        assert_eq!(
+            firmware_uri.as_ref(),
+            "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.cab"
+        )
+    }
 }

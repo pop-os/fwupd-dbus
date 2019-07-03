@@ -2,7 +2,7 @@ use crate::{common::*, dbus_helpers::*, Client, DBusEntry};
 use dbus::arg::RefArg;
 use std::{
     borrow::Cow,
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{self, Seek, SeekFrom},
     iter::FromIterator,
     path::{Path, PathBuf},
@@ -179,40 +179,37 @@ impl Remote {
         client: &reqwest::Client,
         uri: &str,
     ) -> Result<Option<File>, UpdateError> {
-        let cache = Path::new(self.filename_cache.as_ref());
+        let system_cache = Path::new(self.filename_cache.as_ref());
 
-        if let Some(parent) = cache.parent() {
-            fs::create_dir_all(parent).map_err(UpdateError::CreateParent)?;
-        }
-
-        let mut file = if cache.exists() && self.checksum.is_some() {
+        if system_cache.exists() && self.checksum.is_some() {
             let mut file = OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(cache)
-                .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
+                .open(system_cache)
+                .map_err(|why| UpdateError::Open(why, system_cache.to_path_buf()))?;
 
             let checksum = self.checksum.as_ref().unwrap();
             let checksum_matched =
                 validate_checksum(&mut file, checksum, checksum_guess_kind(checksum))
-                    .map_err(|why| UpdateError::Read(why, cache.to_path_buf()))?;
+                    .map_err(|why| UpdateError::Read(why, system_cache.to_path_buf()))?;
 
             if checksum_matched {
                 return Ok(None);
             }
-
-            file.seek(SeekFrom::Start(0)).map_err(UpdateError::Seek)?;
-            file.set_len(0).map_err(UpdateError::Truncate)?;
-
-            file
-        } else {
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(cache)
-                .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?
         };
+
+        let cache: &Path = &place_in_cache(Path::new(
+            system_cache
+                .file_name()
+                .expect("remote filename cache does not have a file name"),
+        ));
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(cache)
+            .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
 
         client
             .get(uri)
@@ -231,6 +228,11 @@ impl Remote {
     fn update_signature(&self, client: &reqwest::Client, uri: &str) -> Result<File, UpdateError> {
         let path = [self.filename_cache.as_ref(), ".asc"].concat();
         let cache = Path::new(path.as_str());
+        let cache: &Path = &place_in_cache(Path::new(
+            cache
+                .file_name()
+                .expect("remote filename cache does not have a file name"),
+        ));
 
         let mut file = OpenOptions::new()
             .read(true)

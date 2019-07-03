@@ -49,6 +49,7 @@ pub type DynVariant = Variant<Box<RefArg + 'static>>;
 pub type DBusEntry = (String, DynVariant);
 
 bitflags! {
+    /// Controls the behavior of the install method.
     pub struct InstallFlags: u8 {
         const OFFLINE         = 1 << 0;
         const ALLOW_REINSTALL = 1 << 1;
@@ -58,6 +59,7 @@ bitflags! {
     }
 }
 
+/// Describes the status of the daemon.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Status {
@@ -178,6 +180,7 @@ impl Client {
         self.get_device_method("GetDowngrades", device_id.as_ref().as_ref())
     }
 
+    /// Update firmware for a `Device` with the firmware specified in a `Release`.
     pub fn update_device_with_release(
         &self,
         client: &reqwest::Client,
@@ -427,7 +430,7 @@ impl Client {
         Ok(iter.map(Device::from_iter))
     }
 
-    /// The daemon status, e.g. **decompressing**.
+    /// The daemon status, e.g. `Decompressing`.
     pub fn status(&self) -> Result<Status, Error> {
         self.get_property::<u32>("Status")
             .map(|v| Status::from(v as u8))

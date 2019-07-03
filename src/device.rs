@@ -5,6 +5,7 @@ use dbus::arg::RefArg;
 use std::iter::FromIterator;
 
 bitflags! {
+    /// Describes attributes of a device.
     pub struct DeviceFlags: u64 {
         /// Device cannot be removed easily
         const INTERNAL               = 1 << 0;
@@ -60,6 +61,7 @@ impl Default for DeviceFlags {
     }
 }
 
+/// Describes the state of the last update on a device.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
 pub enum UpdateState {
@@ -86,6 +88,7 @@ impl From<u32> for UpdateState {
     }
 }
 
+/// The remote ID of a device.
 #[derive(Clone, Debug, Default, Shrinkwrap)]
 pub struct DeviceId(Box<str>);
 

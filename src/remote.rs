@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Describes the type of keyring to use with a remote.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeyringKind {
     Unknown,
@@ -35,6 +36,7 @@ impl Default for KeyringKind {
     }
 }
 
+/// Describes the kind of remote.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RemoteKind {
     Unknown,
@@ -61,6 +63,7 @@ impl Default for RemoteKind {
     }
 }
 
+/// An error that may occur when updating the metadata for a remote.
 #[derive(Debug, Error)]
 pub enum UpdateError {
     #[error(display = "fwupd client errored when updating metadata for remote")]
@@ -87,6 +90,7 @@ pub enum UpdateError {
     Truncate(#[error(cause)] io::Error),
 }
 
+/// The remote ID of a remote.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Shrinkwrap)]
 pub struct RemoteId(pub(crate) Box<str>);
 
@@ -113,7 +117,29 @@ pub struct Remote {
 }
 
 impl Remote {
-    pub fn firmware_uri<'a>(&'a self, url: &'a str) -> Cow<'a, str> {
+    /// Updates the metadata for this remote.
+    pub fn update_metadata(
+        &self,
+        client: &Client,
+        http_client: &reqwest::Client,
+    ) -> Result<(), UpdateError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        if let Some(ref uri) = self.uri {
+            if let Some(file) = self.update_file(http_client, uri)? {
+                let sig = self.update_signature(http_client, uri)?;
+                client
+                    .update_metadata(&self, file, sig)
+                    .map_err(UpdateError::Client)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn firmware_uri<'a>(&'a self, url: &'a str) -> Cow<'a, str> {
         if let Some(ref firmware_base_uri) = self.firmware_base_uri {
             let mut firmware_base_uri: &str = firmware_base_uri;
             if firmware_base_uri.ends_with("/") {
@@ -146,27 +172,6 @@ impl Remote {
         } else {
             Cow::Borrowed(url)
         }
-    }
-
-    pub fn update_metadata(
-        &self,
-        client: &Client,
-        http_client: &reqwest::Client,
-    ) -> Result<(), UpdateError> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        if let Some(ref uri) = self.uri {
-            if let Some(file) = self.update_file(http_client, uri)? {
-                let sig = self.update_signature(http_client, uri)?;
-                client
-                    .update_metadata(&self, file, sig)
-                    .map_err(UpdateError::Client)?;
-            }
-        }
-
-        Ok(())
     }
 
     fn update_file(

@@ -3,6 +3,7 @@ use dbus::arg::RefArg;
 use std::iter::FromIterator;
 
 bitflags! {
+    /// Describes attributes of a release.
     pub struct ReleaseFlags: u64 {
         const TRUSTED_PAYLOAD  = 1 << 0;
         const TRUSTED_METADATA = 1 << 1;
@@ -21,6 +22,7 @@ impl Default for ReleaseFlags {
 }
 
 bitflags! {
+    /// Describes trust levels for the payload and/or metadata.
     pub struct TrustFlags: u64 {
         const PAYLOAD  = 1 << 0;
         const METADATA = 1 << 1;

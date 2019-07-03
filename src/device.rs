@@ -63,7 +63,7 @@ impl Default for DeviceFlags {
 
 /// Describes the state of the last update on a device.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(u32)]
+#[repr(u8)]
 pub enum UpdateState {
     Unknown,
     Pending,
@@ -73,8 +73,8 @@ pub enum UpdateState {
     FailedTransient,
 }
 
-impl From<u32> for UpdateState {
-    fn from(value: u32) -> Self {
+impl From<u8> for UpdateState {
+    fn from(value: u8) -> Self {
         use self::UpdateState::*;
         match value {
             0 => Unknown,
@@ -83,6 +83,37 @@ impl From<u32> for UpdateState {
             3 => Failed,
             4 => NeedsReboot,
             5 => FailedTransient,
+            _ => Unknown,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u8)]
+pub enum VersionFormat {
+    Unknown,
+    Plain,
+    Number,
+    Pair,
+    Triplet,
+    Quad,
+    Bcd,
+    IntelMe,
+    IntelMe2,
+}
+
+impl From<u8> for VersionFormat {
+    fn from(value: u8) -> Self {
+        use self::VersionFormat::*;
+        match value {
+            0 => Unknown,
+            1 => Plain,
+            2 => Number,
+            3 => Pair,
+            4 => Triplet,
+            5 => Quad,
+            6 => Bcd,
+            7 => IntelMe,
+            8 => IntelMe2,
             _ => Unknown,
         }
     }
@@ -117,6 +148,7 @@ pub struct Device {
     pub vendor_id: Box<str>,
     pub vendor: Box<str>,
     pub version_bootloader: Option<Box<str>>,
+    pub version_format: Option<VersionFormat>,
     pub version_lowest: Option<Box<str>>,
     pub version: Box<str>,
 }
@@ -216,7 +248,7 @@ impl FromIterator<DBusEntry> for Device {
                 KEY_UPDATE_ERROR => device.update_error = Some(dbus_str(&value, key).into()),
                 KEY_UPDATE_MESSAGE => device.update_message = Some(dbus_str(&value, key).into()),
                 KEY_UPDATE_STATE => {
-                    device.update_state = Some(UpdateState::from(dbus_u64(&value, key) as u32))
+                    device.update_state = Some(UpdateState::from(dbus_u64(&value, key) as u8))
                 }
                 KEY_VENDOR => device.vendor = dbus_str(&value, key).into(),
                 KEY_VENDOR_ID => device.vendor_id = dbus_str(&value, key).into(),
@@ -225,8 +257,16 @@ impl FromIterator<DBusEntry> for Device {
                     device.version_bootloader = Some(dbus_str(&value, key).into())
                 }
                 KEY_VERSION_LOWEST => device.version_lowest = Some(dbus_str(&value, key).into()),
+                "VersionFormat" => {
+                    device.version_format = Some(VersionFormat::from(dbus_u64(&value, key) as u8))
+                }
                 other => {
-                    eprintln!("unknown remote key: {} ({})", other, value.signature());
+                    eprintln!(
+                        "unknown device key: {} ({}): {:?}",
+                        other,
+                        value.signature(),
+                        value,
+                    );
                 }
             }
         }

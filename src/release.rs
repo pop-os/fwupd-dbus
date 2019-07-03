@@ -43,20 +43,20 @@ pub struct Release {
     pub checksums: Box<[Box<str>]>,
     pub created: u64,
     pub description: Box<str>,
-    pub details_url: Box<str>,
+    pub details_url: Option<Box<str>>,
     pub filename: Box<str>,
     pub flags: ReleaseFlags,
     pub homepage: Box<str>,
     pub install_duration: u32,
     pub license: Box<str>,
     pub name: Box<str>,
-    pub protocol: Box<str>,
+    pub protocol: Option<Box<str>>,
     pub remote_id: RemoteId,
     pub size: u64,
-    pub source_url: Box<str>,
+    pub source_url: Option<Box<str>>,
     pub summary: Box<str>,
     pub trust_flags: TrustFlags,
-    pub update_message: Box<str>,
+    pub update_message: Option<Box<str>>,
     pub uri: Box<str>,
     pub vendor: Box<str>,
     pub version: Box<str>,
@@ -92,13 +92,13 @@ impl FromIterator<DBusEntry> for Release {
                     release.checksums = value
                         .as_iter()
                         .expect("Checksums is not a variant")
-                        .flat_map(|array| array.as_iter().expect("Checksums is not an iterator"))
+                        // .flat_map(|array| array.as_iter().expect("Checksums is not an iterator"))
                         .map(|value| dbus_str(&value, key).into())
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
                 KEY_DESCRIPTION => release.description = dbus_str(&value, key).into(),
-                KEY_DETAILS_URL => release.details_url = dbus_str(&value, key).into(),
+                KEY_DETAILS_URL => release.details_url = Some(dbus_str(&value, key).into()),
                 KEY_FILENAME => release.filename = dbus_str(&value, key).into(),
                 KEY_FLAGS => {
                     release.flags = ReleaseFlags::from_bits_truncate(dbus_u64(&value, key))
@@ -107,15 +107,16 @@ impl FromIterator<DBusEntry> for Release {
                 KEY_INSTALL_DURATION => release.install_duration = dbus_u64(&value, key) as u32,
                 KEY_LICENSE => release.license = dbus_str(&value, key).into(),
                 // KEY_METADATA => (),
-                KEY_PROTOCOL => release.protocol = dbus_str(&value, key).into(),
+                KEY_NAME => release.name = dbus_str(&value, key).into(),
+                KEY_PROTOCOL => release.protocol = Some(dbus_str(&value, key).into()),
                 KEY_REMOTE_ID => release.remote_id = RemoteId(dbus_str(&value, key).into()),
                 KEY_SIZE => release.size = dbus_u64(&value, key),
-                KEY_SOURCE_URL => release.source_url = dbus_str(&value, key).into(),
+                KEY_SOURCE_URL => release.source_url = Some(dbus_str(&value, key).into()),
                 KEY_SUMMARY => release.summary = dbus_str(&value, key).into(),
                 KEY_TRUST_FLAGS => {
                     release.trust_flags = TrustFlags::from_bits_truncate(dbus_u64(&value, key))
                 }
-                KEY_UPDATE_MESSAGE => release.update_message = dbus_str(&value, key).into(),
+                KEY_UPDATE_MESSAGE => release.update_message = Some(dbus_str(&value, key).into()),
                 KEY_URI => release.uri = dbus_str(&value, key).into(),
                 KEY_VENDOR => release.vendor = dbus_str(&value, key).into(),
                 KEY_VERSION => release.version = dbus_str(&value, key).into(),

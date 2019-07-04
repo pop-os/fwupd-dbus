@@ -1,5 +1,6 @@
 use crate::{common::*, dbus_helpers::*, Client, DBusEntry};
 use dbus::arg::RefArg;
+use url::Url;
 use std::{
     borrow::Cow,
     fs::{File, OpenOptions},
@@ -139,8 +140,8 @@ impl Remote {
         Ok(())
     }
 
-    pub(crate) fn firmware_uri<'a>(&'a self, url: &'a str) -> Cow<'a, str> {
-        if let Some(ref firmware_base_uri) = self.firmware_base_uri {
+    pub(crate) fn firmware_uri(&self, url: &str) -> Url {
+        let uri = if let Some(ref firmware_base_uri) = self.firmware_base_uri {
             let mut firmware_base_uri: &str = firmware_base_uri;
             if firmware_base_uri.ends_with("/") {
                 firmware_base_uri = &firmware_base_uri[..firmware_base_uri.len() - 1];
@@ -171,7 +172,9 @@ impl Remote {
         // A normal URI
         } else {
             Cow::Borrowed(url)
-        }
+        };
+
+        uri.parse::<Url>().expect("firmware uri is not a valid uri")
     }
 
     fn update_file(
@@ -198,7 +201,7 @@ impl Remote {
             }
         };
 
-        let cache: &Path = &place_in_cache(Path::new(
+        let cache: &Path = &cache_path(Path::new(
             system_cache
                 .file_name()
                 .expect("remote filename cache does not have a file name"),
@@ -228,7 +231,7 @@ impl Remote {
     fn update_signature(&self, client: &reqwest::Client, uri: &str) -> Result<File, UpdateError> {
         let path = [self.filename_cache.as_ref(), ".asc"].concat();
         let cache = Path::new(path.as_str());
-        let cache: &Path = &place_in_cache(Path::new(
+        let cache: &Path = &cache_path(Path::new(
             cache
                 .file_name()
                 .expect("remote filename cache does not have a file name"),
@@ -298,7 +301,7 @@ impl FromIterator<DBusEntry> for Remote {
                 "Username" => remote.username = Some(dbus_str(&value, key).into()),
                 KEY_URI => remote.uri = Some(dbus_str(&value, key).into()),
                 other => {
-                    eprintln!("unknown remote key: {} ({})", other, value.signature());
+                    eprintln!("unknown remote key: {} ({}): {:?}", other, value.signature(), value);
                 }
             }
         }

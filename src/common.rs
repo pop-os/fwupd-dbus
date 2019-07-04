@@ -1,5 +1,6 @@
 use crypto_hash::{Algorithm, Hasher};
 use hex_view::HexView;
+use url::Url;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
@@ -40,7 +41,26 @@ pub fn validate_checksum<R: Read>(
     Ok(checksum == digest.as_str())
 }
 
-pub fn place_in_cache(file: &Path) -> PathBuf {
+pub fn cache_path_from_uri(uri: &Url) -> PathBuf {
+    let domain = uri.host_str();
+
+    let path = Path::new(uri.path())
+        .file_name()
+        .expect("no filename for firmware file")
+        .to_str()
+        .expect("URI is not UTF-8");
+
+    let maybe_heap: String;
+    cache_path(match domain.as_ref() {
+        Some(domain) => {
+            maybe_heap = [domain, "/", path].concat();
+            Path::new(&maybe_heap)
+        },
+        None => Path::new(path)
+    })
+}
+
+pub fn cache_path(file: &Path) -> PathBuf {
     xdg::BaseDirectories::with_prefix("fwupd-client")
         .expect("failed to get XDG base directories")
         .place_cache_file(file)

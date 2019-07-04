@@ -24,7 +24,7 @@ use dbus::{
 };
 
 use dbus::stdintf::org_freedesktop_dbus::Properties;
-
+use url::Url;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -209,15 +209,14 @@ impl Client {
 
         // Create URI, substituting if required.
         let uri = remote.firmware_uri(&release.uri);
-
-        let mut req_builder = client.get(uri.as_ref());
+        let file_path = common::cache_path_from_uri(&uri);
+        let mut req_builder = client.get(uri);
 
         // Set the username and password.
         if let Some(ref username) = remote.username {
             req_builder = req_builder.basic_auth(username, remote.password.as_ref());
         }
 
-        let file_path = common::place_in_cache(Path::new(uri.as_ref()));
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -599,7 +598,7 @@ mod tests {
     fn remote_baseuri() {
         let remote = download_remote();
         let firmware_uri = remote.firmware_uri("http://bbc.co.uk/firmware.cab");
-        assert_eq!(firmware_uri.as_ref(), "https://my.fancy.cdn/firmware.cab")
+        assert_eq!(firmware_uri.to_string().as_str(), "https://my.fancy.cdn/firmware.cab")
     }
 
     #[test]
@@ -607,7 +606,7 @@ mod tests {
         let remote = nopath_remote();
         let firmware_uri = remote.firmware_uri("firmware.cab");
         assert_eq!(
-            firmware_uri.as_ref(),
+            firmware_uri.to_string().as_str(),
             "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.cab"
         )
     }

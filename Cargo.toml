@@ -17,3 +17,4 @@ crypto-hash = { git = "https://github.com/mmstick/crypto-hash", branch = "algo-d
 hex-view = "0.1.2"
 cascade = "0.1.3"
 xdg = "2.2.0"
+url = "1.7.2"

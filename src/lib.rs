@@ -24,7 +24,6 @@ use dbus::{
 };
 
 use dbus::stdintf::org_freedesktop_dbus::Properties;
-use url::Url;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -43,7 +42,7 @@ pub const DBUS_NAME: &str = "org.freedesktop.fwupd";
 pub const DBUS_IFACE: &str = "org.freedesktop.fwupd";
 pub const DBUS_PATH: &str = "/";
 
-const TIMEOUT: i32 = 5000;
+const TIMEOUT: i32 = -1;
 
 pub type DynVariant = Variant<Box<RefArg + 'static>>;
 pub type DBusEntry = (String, DynVariant);
@@ -268,7 +267,7 @@ impl Client {
         filename: &Path,
         handle: Option<H>,
         flags: InstallFlags,
-    ) -> Result<HashMap<String, DynVariant>, Error> {
+    ) -> Result<(), Error> {
         const METHOD: &str = "Install";
 
         let fd = match handle {
@@ -306,14 +305,13 @@ impl Client {
             };
         };
 
-        let options = Array::new(options);
+        let options = Dict::new(options);
 
         let id: &str = id.as_ref().as_ref();
         let cb = |m: Message| m.append3(id, OwnedFd::new(fd), options);
 
-        self.call_method(METHOD, cb)?
-            .read1()
-            .map_err(|why| Error::ArgumentMismatch(METHOD, why))
+        self.call_method(METHOD, cb)?;
+        Ok(())
     }
 
     /// Listens for signals from the DBus daemon.

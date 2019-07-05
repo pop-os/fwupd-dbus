@@ -36,7 +36,7 @@ impl Default for TrustFlags {
 }
 
 /// Information about an available fwupd remote.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Release {
     pub appstream_id: Box<str>,
     pub categories: Box<[Box<str>]>,

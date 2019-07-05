@@ -1,6 +1,5 @@
 use crate::{common::*, dbus_helpers::*, Client, DBusEntry};
 use dbus::arg::RefArg;
-use url::Url;
 use std::{
     borrow::Cow,
     fs::{File, OpenOptions},
@@ -8,6 +7,7 @@ use std::{
     iter::FromIterator,
     path::{Path, PathBuf},
 };
+use url::Url;
 
 /// Describes the type of keyring to use with a remote.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -96,7 +96,7 @@ pub enum UpdateError {
 pub struct RemoteId(pub(crate) Box<str>);
 
 /// Information about an available fwupd remote.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Remote {
     pub agreement: Option<Box<str>>,
     pub approval_required: bool,
@@ -301,7 +301,12 @@ impl FromIterator<DBusEntry> for Remote {
                 "Username" => remote.username = Some(dbus_str(&value, key).into()),
                 KEY_URI => remote.uri = Some(dbus_str(&value, key).into()),
                 other => {
-                    eprintln!("unknown remote key: {} ({}): {:?}", other, value.signature(), value);
+                    eprintln!(
+                        "unknown remote key: {} ({}): {:?}",
+                        other,
+                        value.signature(),
+                        value
+                    );
                 }
             }
         }

@@ -124,7 +124,7 @@ impl From<u8> for VersionFormat {
 pub struct DeviceId(Box<str>);
 
 /// A device that is potentially-supported by fwupd.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Device {
     pub checksum: Option<Box<str>>,
     pub created: u64,

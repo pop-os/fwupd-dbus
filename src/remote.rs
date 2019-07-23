@@ -187,7 +187,6 @@ impl Remote {
         if system_cache.exists() && self.checksum.is_some() {
             let mut file = OpenOptions::new()
                 .read(true)
-                .write(true)
                 .open(system_cache)
                 .map_err(|why| UpdateError::Open(why, system_cache.to_path_buf()))?;
 

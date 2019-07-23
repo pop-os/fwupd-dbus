@@ -2,10 +2,11 @@ use crate::{common::*, dbus_helpers::*, Client, DBusEntry};
 use dbus::arg::RefArg;
 use std::{
     borrow::Cow,
-    fs::{File, OpenOptions},
+    fs::{metadata, File, OpenOptions},
     io::{self, Seek, SeekFrom},
     iter::FromIterator,
     path::{Path, PathBuf},
+    time::{Duration, SystemTime},
 };
 use url::Url;
 
@@ -163,6 +164,14 @@ impl Remote {
         };
 
         uri.parse::<Url>().expect("firmware uri is not a valid uri")
+    }
+
+    /// Fetch the time since the last update, if such a time can be fetched.
+    pub fn time_since_last_update(&self) -> Option<Duration> {
+        metadata(self.filename_cache.as_ref())
+            .and_then(|md| md.modified())
+            .ok()
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
     }
 
     fn update_file(

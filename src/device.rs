@@ -1,6 +1,4 @@
-use crate::common::*;
-use crate::dbus_helpers::*;
-use crate::DBusEntry;
+use crate::{common::*, dbus_helpers::*, DBusEntry};
 use dbus::arg::RefArg;
 use std::iter::FromIterator;
 
@@ -56,9 +54,7 @@ bitflags! {
 }
 
 impl Default for DeviceFlags {
-    fn default() -> Self {
-        DeviceFlags::empty()
-    }
+    fn default() -> Self { DeviceFlags::empty() }
 }
 
 /// Describes the state of the last update on a device.
@@ -126,69 +122,55 @@ pub struct DeviceId(Box<str>);
 /// A device that is potentially-supported by fwupd.
 #[derive(Clone, Debug, Default)]
 pub struct Device {
-    pub checksum: Option<Box<str>>,
-    pub created: u64,
-    pub description: Option<Box<str>>,
-    pub device_id: DeviceId,
-    pub flags: DeviceFlags,
-    pub flashes_left: Option<u32>,
-    pub guid: Box<[Box<str>]>,
-    pub icon: Box<[Box<str>]>,
-    pub install_duration: Option<u32>,
-    pub instance_ids: Box<[Box<str>]>,
-    pub modified: Option<u64>,
-    pub name: Box<str>,
-    pub parent_device_id: Option<DeviceId>,
-    pub plugin: Box<str>,
-    pub serial: Option<Box<str>>,
-    pub summary: Option<Box<str>>,
-    pub update_error: Option<Box<str>>,
-    pub update_message: Option<Box<str>>,
-    pub update_state: Option<UpdateState>,
-    pub vendor_id: Box<str>,
-    pub vendor: Box<str>,
+    pub checksum:           Option<Box<str>>,
+    pub created:            u64,
+    pub description:        Option<Box<str>>,
+    pub device_id:          DeviceId,
+    pub flags:              DeviceFlags,
+    pub flashes_left:       Option<u32>,
+    pub guid:               Box<[Box<str>]>,
+    pub icon:               Box<[Box<str>]>,
+    pub install_duration:   Option<u32>,
+    pub instance_ids:       Box<[Box<str>]>,
+    pub modified:           Option<u64>,
+    pub name:               Box<str>,
+    pub parent_device_id:   Option<DeviceId>,
+    pub plugin:             Box<str>,
+    pub serial:             Option<Box<str>>,
+    pub summary:            Option<Box<str>>,
+    pub update_error:       Option<Box<str>>,
+    pub update_message:     Option<Box<str>>,
+    pub update_state:       Option<UpdateState>,
+    pub vendor_id:          Box<str>,
+    pub vendor:             Box<str>,
     pub version_bootloader: Option<Box<str>>,
-    pub version_format: Option<VersionFormat>,
-    pub version_lowest: Option<Box<str>>,
-    pub version: Box<str>,
+    pub version_format:     Option<VersionFormat>,
+    pub version_lowest:     Option<Box<str>>,
+    pub version:            Box<str>,
 }
 
 impl Device {
     /// Check if the given `DeviceFlag` is set.
-    pub fn has_flag(&self, flags: DeviceFlags) -> bool {
-        self.flags.contains(flags)
-    }
+    pub fn has_flag(&self, flags: DeviceFlags) -> bool { self.flags.contains(flags) }
 
     /// Returns true if a GUID match was found.
-    pub fn has_guid(&self, guid: &str) -> bool {
-        self.guid.iter().any(|g| g.as_ref() == guid)
-    }
+    pub fn has_guid(&self, guid: &str) -> bool { self.guid.iter().any(|g| g.as_ref() == guid) }
 
     /// Checks if the device is supported by fwupd.
-    pub fn is_supported(&self) -> bool {
-        self.has_flag(DeviceFlags::SUPPORTED)
-    }
+    pub fn is_supported(&self) -> bool { self.has_flag(DeviceFlags::SUPPORTED) }
 
     /// Determins if the device is updateable or not.
-    pub fn is_updateable(&self) -> bool {
-        self.has_flag(DeviceFlags::UPDATABLE)
-    }
+    pub fn is_updateable(&self) -> bool { self.has_flag(DeviceFlags::UPDATABLE) }
 
     /// Checks if the device requires a reboot.
-    pub fn needs_reboot(&self) -> bool {
-        self.has_flag(DeviceFlags::NEEDS_REBOOT)
-    }
+    pub fn needs_reboot(&self) -> bool { self.has_flag(DeviceFlags::NEEDS_REBOOT) }
 
     /// Check if the device must be updated offline.
-    pub fn only_offline(&self) -> bool {
-        self.has_flag(DeviceFlags::ONLY_OFFLINE)
-    }
+    pub fn only_offline(&self) -> bool { self.has_flag(DeviceFlags::ONLY_OFFLINE) }
 }
 
 impl AsRef<DeviceId> for Device {
-    fn as_ref(&self) -> &DeviceId {
-        &self.device_id
-    }
+    fn as_ref(&self) -> &DeviceId { &self.device_id }
 }
 
 impl FromIterator<DBusEntry> for Device {
@@ -261,12 +243,7 @@ impl FromIterator<DBusEntry> for Device {
                     device.version_format = Some(VersionFormat::from(dbus_u64(&value, key) as u8))
                 }
                 other => {
-                    eprintln!(
-                        "unknown device key: {} ({}): {:?}",
-                        other,
-                        value.signature(),
-                        value,
-                    );
+                    eprintln!("unknown device key: {} ({}): {:?}", other, value.signature(), value,);
                 }
             }
         }

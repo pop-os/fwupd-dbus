@@ -1,8 +1,10 @@
 use crypto_hash::{Algorithm, Hasher};
 use hex_view::HexView;
+use std::{
+    io::{self, Read},
+    path::{Path, PathBuf},
+};
 use url::Url;
-use std::io::{self, Read};
-use std::path::{Path, PathBuf};
 
 /// Based on libfwupd/fwupd-common.c
 pub fn checksum_guess_kind(checksum: &str) -> Algorithm {
@@ -55,8 +57,8 @@ pub fn cache_path_from_uri(uri: &Url) -> PathBuf {
         Some(domain) => {
             maybe_heap = [domain, "/", path].concat();
             Path::new(&maybe_heap)
-        },
-        None => Path::new(path)
+        }
+        None => Path::new(path),
     })
 }
 

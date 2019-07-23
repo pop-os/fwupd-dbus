@@ -32,9 +32,7 @@ impl From<u8> for KeyringKind {
 }
 
 impl Default for KeyringKind {
-    fn default() -> Self {
-        KeyringKind::None
-    }
+    fn default() -> Self { KeyringKind::None }
 }
 
 /// Describes the kind of remote.
@@ -59,9 +57,7 @@ impl From<u8> for RemoteKind {
 }
 
 impl Default for RemoteKind {
-    fn default() -> Self {
-        RemoteKind::Unknown
-    }
+    fn default() -> Self { RemoteKind::Unknown }
 }
 
 /// An error that may occur when updating the metadata for a remote.
@@ -75,15 +71,9 @@ pub enum UpdateError {
     CreateParent(#[error(cause)] io::Error),
     #[error(display = "remote returned error when fetching firmware metadata")]
     Get(#[error(cause)] reqwest::Error),
-    #[error(
-        display = "unable to open cached firmware metadata ({:?}) for remote",
-        _1
-    )]
+    #[error(display = "unable to open cached firmware metadata ({:?}) for remote", _1)]
     Open(#[error(cause)] io::Error, PathBuf),
-    #[error(
-        display = "failed to read the cached firmware metadata ({:?}) for remote",
-        _1
-    )]
+    #[error(display = "failed to read the cached firmware metadata ({:?}) for remote", _1)]
     Read(#[error(cause)] io::Error, PathBuf),
     #[error(display = "failed to seek to beginning of firmware file")]
     Seek(#[error(cause)] io::Error),
@@ -98,23 +88,23 @@ pub struct RemoteId(pub(crate) Box<str>);
 /// Information about an available fwupd remote.
 #[derive(Clone, Debug, Default)]
 pub struct Remote {
-    pub agreement: Option<Box<str>>,
+    pub agreement:         Option<Box<str>>,
     pub approval_required: bool,
-    pub checksum: Option<Box<str>>,
-    pub enabled: bool,
-    pub filename_cache: Box<str>,
-    pub filename_source: Box<str>,
+    pub checksum:          Option<Box<str>>,
+    pub enabled:           bool,
+    pub filename_cache:    Box<str>,
+    pub filename_source:   Box<str>,
     pub firmware_base_uri: Option<Box<str>>,
-    pub keyring: KeyringKind,
-    pub kind: RemoteKind,
+    pub keyring:           KeyringKind,
+    pub kind:              RemoteKind,
     pub modification_time: u64,
-    pub password: Option<Box<str>>,
-    pub priority: i16,
-    pub remote_id: RemoteId,
-    pub report_uri: Option<Box<str>>,
-    pub title: Box<str>,
-    pub uri: Option<Box<str>>,
-    pub username: Option<Box<str>>,
+    pub password:          Option<Box<str>>,
+    pub priority:          i16,
+    pub remote_id:         RemoteId,
+    pub report_uri:        Option<Box<str>>,
+    pub title:             Box<str>,
+    pub uri:               Option<Box<str>>,
+    pub username:          Option<Box<str>>,
 }
 
 impl Remote {
@@ -131,9 +121,7 @@ impl Remote {
         if let Some(ref uri) = self.uri {
             if let Some(file) = self.update_file(http_client, uri)? {
                 let sig = self.update_signature(http_client, uri)?;
-                client
-                    .update_metadata(&self, file, sig)
-                    .map_err(UpdateError::Client)?;
+                client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
             }
         }
 
@@ -201,9 +189,7 @@ impl Remote {
         };
 
         let cache: &Path = &cache_path(Path::new(
-            system_cache
-                .file_name()
-                .expect("remote filename cache does not have a file name"),
+            system_cache.file_name().expect("remote filename cache does not have a file name"),
         ));
 
         let mut file = OpenOptions::new()
@@ -231,9 +217,7 @@ impl Remote {
         let path = [self.filename_cache.as_ref(), ".asc"].concat();
         let cache = Path::new(path.as_str());
         let cache: &Path = &cache_path(Path::new(
-            cache
-                .file_name()
-                .expect("remote filename cache does not have a file name"),
+            cache.file_name().expect("remote filename cache does not have a file name"),
         ));
 
         let mut file = OpenOptions::new()
@@ -259,9 +243,7 @@ impl Remote {
 }
 
 impl AsRef<RemoteId> for Remote {
-    fn as_ref(&self) -> &RemoteId {
-        &self.remote_id
-    }
+    fn as_ref(&self) -> &RemoteId { &self.remote_id }
 }
 
 impl FromIterator<DBusEntry> for Remote {
@@ -300,12 +282,7 @@ impl FromIterator<DBusEntry> for Remote {
                 "Username" => remote.username = Some(dbus_str(&value, key).into()),
                 KEY_URI => remote.uri = Some(dbus_str(&value, key).into()),
                 other => {
-                    eprintln!(
-                        "unknown remote key: {} ({}): {:?}",
-                        other,
-                        value.signature(),
-                        value
-                    );
+                    eprintln!("unknown remote key: {} ({}): {:?}", other, value.signature(), value);
                 }
             }
         }

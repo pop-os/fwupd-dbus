@@ -16,9 +16,7 @@ bitflags! {
 }
 
 impl Default for ReleaseFlags {
-    fn default() -> Self {
-        ReleaseFlags::empty()
-    }
+    fn default() -> Self { ReleaseFlags::empty() }
 }
 
 bitflags! {
@@ -30,42 +28,38 @@ bitflags! {
 }
 
 impl Default for TrustFlags {
-    fn default() -> Self {
-        TrustFlags::empty()
-    }
+    fn default() -> Self { TrustFlags::empty() }
 }
 
 /// Information about an available fwupd remote.
 #[derive(Clone, Debug, Default)]
 pub struct Release {
-    pub appstream_id: Box<str>,
-    pub categories: Box<[Box<str>]>,
-    pub checksums: Box<[Box<str>]>,
-    pub created: u64,
-    pub description: Box<str>,
-    pub details_url: Option<Box<str>>,
-    pub filename: Box<str>,
-    pub flags: ReleaseFlags,
-    pub homepage: Box<str>,
+    pub appstream_id:     Box<str>,
+    pub categories:       Box<[Box<str>]>,
+    pub checksums:        Box<[Box<str>]>,
+    pub created:          u64,
+    pub description:      Box<str>,
+    pub details_url:      Option<Box<str>>,
+    pub filename:         Box<str>,
+    pub flags:            ReleaseFlags,
+    pub homepage:         Box<str>,
     pub install_duration: u32,
-    pub license: Box<str>,
-    pub name: Box<str>,
-    pub protocol: Option<Box<str>>,
-    pub remote_id: RemoteId,
-    pub size: u64,
-    pub source_url: Option<Box<str>>,
-    pub summary: Box<str>,
-    pub trust_flags: TrustFlags,
-    pub update_message: Option<Box<str>>,
-    pub uri: Box<str>,
-    pub vendor: Box<str>,
-    pub version: Box<str>,
+    pub license:          Box<str>,
+    pub name:             Box<str>,
+    pub protocol:         Option<Box<str>>,
+    pub remote_id:        RemoteId,
+    pub size:             u64,
+    pub source_url:       Option<Box<str>>,
+    pub summary:          Box<str>,
+    pub trust_flags:      TrustFlags,
+    pub update_message:   Option<Box<str>>,
+    pub uri:              Box<str>,
+    pub vendor:           Box<str>,
+    pub version:          Box<str>,
 }
 
 impl AsRef<RemoteId> for Release {
-    fn as_ref(&self) -> &RemoteId {
-        &self.remote_id
-    }
+    fn as_ref(&self) -> &RemoteId { &self.remote_id }
 }
 
 impl FromIterator<DBusEntry> for Release {

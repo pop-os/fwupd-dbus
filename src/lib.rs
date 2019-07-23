@@ -13,9 +13,7 @@ mod device;
 mod release;
 mod remote;
 
-pub use self::device::*;
-pub use self::release::*;
-pub use self::remote::*;
+pub use self::{device::*, release::*, remote::*};
 
 use dbus::{
     self,
@@ -141,9 +139,7 @@ pub struct Client(dbus::Connection);
 
 impl Client {
     pub fn new() -> Result<Self, Error> {
-        Connection::get_private(BusType::System)
-            .map(Self)
-            .map_err(Error::Connection)
+        Connection::get_private(BusType::System).map(Self).map_err(Error::Connection)
     }
 
     /// Activate a firmware update on the device.
@@ -170,9 +166,7 @@ impl Client {
     }
 
     /// Gets a list of all the devices that are supported.
-    pub fn devices(&self) -> Result<Vec<Device>, Error> {
-        self.get_method("GetDevices")
-    }
+    pub fn devices(&self) -> Result<Vec<Device>, Error> { self.get_method("GetDevices") }
 
     /// Get a list of all the downgrades possible for a specific device.
     pub fn downgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
@@ -279,10 +273,7 @@ impl Client {
                 .into_raw_fd(),
         };
 
-        let filename = filename
-            .as_os_str()
-            .to_str()
-            .expect("filename is not UTF-8");
+        let filename = filename.as_os_str().to_str().expect("filename is not UTF-8");
 
         let options: Vec<(&str, DynVariant)> = cascade! {
             opts: Vec::with_capacity(8);
@@ -331,9 +322,8 @@ impl Client {
             signal: Message,
             method: &'static str,
         ) -> Result<T, Error> {
-            let iter: Dict<String, Variant<Box<RefArg + 'static>>, _> = signal
-                .read1()
-                .map_err(|why| Error::ArgumentMismatch(method, why))?;
+            let iter: Dict<String, Variant<Box<RefArg + 'static>>, _> =
+                signal.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
             Ok(T::from_iter(iter))
         }
@@ -355,8 +345,8 @@ impl Client {
                         .read3::<String, HashMap<String, DynVariant>, Vec<String>>()
                         .map_err(|why| Error::ArgumentMismatch("PropertiesChanged", why))
                         .map(|values| Signal::PropertiesChanged {
-                            interface: values.0.into(),
-                            changed: values.1,
+                            interface:   values.0.into(),
+                            changed:     values.1,
                             invalidated: values.2,
                         }),
                     _ => return None,
@@ -415,9 +405,7 @@ impl Client {
     }
 
     /// Gets the list of remotes.
-    pub fn remotes(&self) -> Result<Vec<Remote>, Error> {
-        self.get_method("GetRemotes")
-    }
+    pub fn remotes(&self) -> Result<Vec<Remote>, Error> { self.get_method("GetRemotes") }
 
     /// Gets the results of an offline update.
     pub fn results<D: AsRef<DeviceId>>(&self, id: D) -> Result<Option<Device>, Error> {
@@ -429,14 +417,11 @@ impl Client {
 
     /// The daemon status, e.g. `Decompressing`.
     pub fn status(&self) -> Result<Status, Error> {
-        self.get_property::<u32>("Status")
-            .map(|v| Status::from(v as u8))
+        self.get_property::<u32>("Status").map(|v| Status::from(v as u8))
     }
 
     /// If the daemon has been tainted with a third party plugin.
-    pub fn tainted(&self) -> Result<bool, Error> {
-        self.get_property::<bool>("Tainted")
-    }
+    pub fn tainted(&self) -> Result<bool, Error> { self.get_property::<bool>("Tainted") }
 
     /// Unlock the device to allow firmware access.
     pub fn unlock<D: AsRef<DeviceId>>(&self, id: D) -> Result<(), Error> {
@@ -489,9 +474,8 @@ impl Client {
         method: &'static str,
     ) -> Result<Vec<T>, Error> {
         let message = self.call_method(method, |m| m)?;
-        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> = message
-            .read1()
-            .map_err(|why| Error::ArgumentMismatch(method, why))?;
+        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
+            message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
         Ok(iter.map(T::from_iter).collect())
     }
@@ -502,9 +486,8 @@ impl Client {
         device_id: &str,
     ) -> Result<Vec<T>, Error> {
         let message = self.call_method(method, |m| m.append1(device_id))?;
-        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> = message
-            .read1()
-            .map_err(|why| Error::ArgumentMismatch(method, why))?;
+        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
+            message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
         Ok(iter.map(T::from_iter).collect())
     }
@@ -517,9 +500,8 @@ impl Client {
         let cb = move |m: Message| m.append1(OwnedFd::new(handle.into_raw_fd()));
 
         let message = self.call_method(method, cb)?;
-        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> = message
-            .read1()
-            .map_err(|why| Error::ArgumentMismatch(method, why))?;
+        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
+            message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
         Ok(iter.map(T::from_iter).collect())
     }
@@ -540,8 +522,7 @@ impl Client {
 
         m = append_args(m);
 
-        self.send_with_reply_and_block(m, TIMEOUT)
-            .map_err(|why| Error::Call(method, why))
+        self.send_with_reply_and_block(m, TIMEOUT).map_err(|why| Error::Call(method, why))
     }
 
     fn connection_path<'a>(&'a self) -> ConnPath<'a, &'a Connection> {
@@ -561,8 +542,8 @@ pub enum Signal {
     DeviceRemoved(Device),
     /// Triggers when a property has changed.
     PropertiesChanged {
-        interface: Box<str>,
-        changed: HashMap<String, DynVariant>,
+        interface:   Box<str>,
+        changed:     HashMap<String, DynVariant>,
         invalidated: Vec<String>,
     },
 }

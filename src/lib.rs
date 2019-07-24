@@ -24,7 +24,7 @@ use dbus::{
 use dbus::stdintf::org_freedesktop_dbus::Properties;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs::{File, OpenOptions},
     io::{self, Seek, SeekFrom},
     iter::FromIterator,
@@ -169,7 +169,7 @@ impl Client {
     pub fn devices(&self) -> Result<Vec<Device>, Error> { self.get_method("GetDevices") }
 
     /// Get a list of all the downgrades possible for a specific device.
-    pub fn downgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
+    pub fn downgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<BTreeSet<Release>, Error> {
         self.get_device_method("GetDowngrades", device_id.as_ref().as_ref())
     }
 
@@ -392,7 +392,7 @@ impl Client {
     }
 
     /// Gets a list of all the releases for a specific device.
-    pub fn releases<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
+    pub fn releases<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<BTreeSet<Release>, Error> {
         self.get_device_method("GetReleases", device_id.as_ref().as_ref())
     }
 
@@ -449,7 +449,7 @@ impl Client {
     }
 
     /// Get a list of all the upgrades possible for a specific device.
-    pub fn upgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
+    pub fn upgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<BTreeSet<Release>, Error> {
         self.get_device_method("GetUpgrades", device_id.as_ref().as_ref())
     }
 
@@ -480,16 +480,16 @@ impl Client {
         Ok(iter.map(T::from_iter).collect())
     }
 
-    fn get_device_method<T: FromIterator<DBusEntry>>(
+    fn get_device_method<T: FromIterator<DBusEntry>, C: FromIterator<T>>(
         &self,
         method: &'static str,
         device_id: &str,
-    ) -> Result<Vec<T>, Error> {
+    ) -> Result<C, Error> {
         let message = self.call_method(method, |m| m.append1(device_id))?;
         let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
             message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
-        Ok(iter.map(T::from_iter).collect())
+        Ok(C::from_iter(iter.map(T::from_iter)))
     }
 
     fn get_handle_method<T: FromIterator<DBusEntry>, H: IntoRawFd>(

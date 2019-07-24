@@ -1,6 +1,6 @@
 use crate::{common::*, dbus_helpers::*, DBusEntry, RemoteId};
 use dbus::arg::RefArg;
-use std::iter::FromIterator;
+use std::{cmp::Ordering, iter::FromIterator};
 
 bitflags! {
     /// Describes attributes of a release.
@@ -32,7 +32,7 @@ impl Default for TrustFlags {
 }
 
 /// Information about an available fwupd remote.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq)]
 pub struct Release {
     pub appstream_id:     Box<str>,
     pub categories:       Box<[Box<str>]>,
@@ -56,6 +56,24 @@ pub struct Release {
     pub uri:              Box<str>,
     pub vendor:           Box<str>,
     pub version:          Box<str>,
+}
+
+impl Ord for Release {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.version.cmp(&other.version)
+    }
+}
+
+impl PartialOrd for Release {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Release {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+    }
 }
 
 impl AsRef<RemoteId> for Release {

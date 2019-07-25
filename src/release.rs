@@ -59,21 +59,15 @@ pub struct Release {
 }
 
 impl Ord for Release {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.version.cmp(&other.version)
-    }
+    fn cmp(&self, other: &Self) -> Ordering { self.version.cmp(&other.version) }
 }
 
 impl PartialOrd for Release {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
 impl PartialEq for Release {
-    fn eq(&self, other: &Self) -> bool {
-        self.version == other.version
-    }
+    fn eq(&self, other: &Self) -> bool { self.version == other.version }
 }
 
 impl AsRef<RemoteId> for Release {

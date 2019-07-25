@@ -22,6 +22,7 @@ use dbus::{
 };
 
 use dbus::stdintf::org_freedesktop_dbus::Properties;
+use progress_streams::ProgressWriter;
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
@@ -100,6 +101,15 @@ impl From<u8> for Status {
     }
 }
 
+#[derive(Debug)]
+pub enum FlashEvent {
+    DownloadInitiate(u64),
+    DownloadUpdate(usize),
+    DownloadComplete,
+    VerifyingChecksum,
+    FlashInProgress,
+}
+
 /// An error that may occur when using the client.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -114,7 +124,7 @@ pub enum Error {
     #[error(display = "the remote firmware which was downloaded has an invalid checksum")]
     FirmwareChecksumMismatch,
     #[error(display = "failed to copy firmware file from remote")]
-    FirmwareCopy(#[error(case)] reqwest::Error),
+    FirmwareCopy(#[error(case)] io::Error),
     #[error(display = "failed to create firmware file in user cache")]
     FirmwareCreate(#[error(cause)] io::Error),
     #[error(display = "failed to GET firmware file from remote")]
@@ -174,12 +184,13 @@ impl Client {
     }
 
     /// Update firmware for a `Device` with the firmware specified in a `Release`.
-    pub fn update_device_with_release(
+    pub fn update_device_with_release<F: FnMut(FlashEvent)>(
         &self,
         client: &reqwest::Client,
         device: &Device,
         release: &Release,
         mut flags: InstallFlags,
+        mut callback: Option<F>,
     ) -> Result<(), Error> {
         let remote = self.remote(release)?;
 
@@ -196,8 +207,16 @@ impl Client {
         };
 
         if let Some(filename) = filename {
+            if let Some(ref mut cb) = callback {
+                cb(FlashEvent::FlashInProgress);
+            }
+
             self.install(&device, "(user)", &filename, None::<File>, flags)?;
             return Ok(());
+        }
+
+        if let Some(ref mut cb) = callback {
+            cb(FlashEvent::DownloadInitiate(release.size));
         }
 
         // Create URI, substituting if required.
@@ -218,15 +237,32 @@ impl Client {
             .map_err(Error::FirmwareCreate)?;
 
         eprintln!("downloading {} for {}...", release.version, device.name);
-        req_builder
+        let mut response = req_builder
             .send()
             .map_err(Error::FirmwareGet)?
             .error_for_status()
-            .map_err(Error::FirmwareGet)?
-            .copy_to(&mut file)
-            .map_err(Error::FirmwareCopy)?;
+            .map_err(Error::FirmwareGet)?;
+
+        let result = match callback {
+            Some(ref mut callback) => {
+                let mut writer = ProgressWriter::new(&mut file, |progress| {
+                    callback(FlashEvent::DownloadUpdate(progress))
+                });
+
+                let result = io::copy(&mut response, &mut writer);
+                callback(FlashEvent::DownloadComplete);
+                result
+            }
+            None => io::copy(&mut response, &mut file),
+        };
+
+        result.map_err(Error::FirmwareCopy)?;
 
         file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+
+        if let Some(ref mut cb) = callback {
+            cb(FlashEvent::VerifyingChecksum);
+        }
 
         if let Some((checksum, algorithm)) = common::find_best_checksum(&release.checksums) {
             let checksum_matched = common::validate_checksum(&mut file, checksum, algorithm)
@@ -241,6 +277,10 @@ impl Client {
 
         if device.only_offline() {
             flags |= InstallFlags::OFFLINE;
+        }
+
+        if let Some(ref mut cb) = callback {
+            cb(FlashEvent::FlashInProgress);
         }
 
         self.install(&device, "(user)", &file_path, Some(file), flags)?;

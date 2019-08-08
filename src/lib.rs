@@ -18,6 +18,7 @@ pub use self::{device::*, release::*, remote::*};
 use dbus::{
     self,
     arg::{Arg, Array, Dict, Get, RefArg, Variant},
+    stdintf::org_freedesktop_dbus::Peer,
     BusType, ConnPath, Connection, ConnectionItem, Message, OwnedFd,
 };
 
@@ -137,6 +138,8 @@ pub enum Error {
     FirmwareSeek(#[error(cause)] io::Error),
     #[error(display = "failed to get property for {}", _0)]
     GetProperty(&'static str, #[error(cause)] dbus::Error),
+    #[error(display = "unable to ping the dbus daemon")]
+    Ping(#[error(cause)] dbus::Error),
     #[error(display = "failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
     #[error(display = "remote not found")]
@@ -429,6 +432,10 @@ impl Client {
     /// The job percentage completion, or 0 for unknown.
     pub fn percentage(&self) -> Result<u8, Error> {
         self.get_property::<u32>("Percentage").map(|v| v as u8)
+    }
+
+    pub fn ping(&self) -> Result<(), Error> {
+        self.connection_path().ping().map_err(Error::Ping)
     }
 
     /// Gets a list of all the releases for a specific device.

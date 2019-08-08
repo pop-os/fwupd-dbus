@@ -72,6 +72,8 @@ pub enum UpdateError {
     CreateParent(#[error(cause)] io::Error),
     #[error(display = "remote returned error when fetching firmware metadata")]
     Get(#[error(cause)] reqwest::Error),
+    #[error(display = "attempted to update a remote without a URI")]
+    NoUri,
     #[error(display = "unable to open cached firmware metadata ({:?}) for remote", _1)]
     Open(#[error(cause)] io::Error, PathBuf),
     #[error(display = "failed to read the cached firmware metadata ({:?}) for remote", _1)]
@@ -119,11 +121,10 @@ impl Remote {
             return Ok(());
         }
 
-        if let Some(ref uri) = self.uri {
-            if let Some(file) = self.update_file(http_client, uri)? {
-                let sig = self.update_signature(http_client, uri)?;
-                client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
-            }
+        let uri = self.uri.as_ref().ok_or(UpdateError::NoUri)?;
+        if let Some(file) = self.update_file(http_client, uri)? {
+            let sig = self.update_signature(http_client, uri)?;
+            client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
         }
 
         Ok(())

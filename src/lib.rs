@@ -26,7 +26,7 @@ use dbus::stdintf::org_freedesktop_dbus::Properties;
 use progress_streams::ProgressWriter;
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::HashMap,
     fs::{File, OpenOptions},
     io::{self, Seek, SeekFrom},
     iter::FromIterator,
@@ -182,7 +182,7 @@ impl Client {
     pub fn devices(&self) -> Result<Vec<Device>, Error> { self.get_method("GetDevices") }
 
     /// Get a list of all the downgrades possible for a specific device.
-    pub fn downgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<BTreeSet<Release>, Error> {
+    pub fn downgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
         self.get_device_method("GetDowngrades", device_id.as_ref().as_ref())
     }
 
@@ -434,12 +434,10 @@ impl Client {
         self.get_property::<u32>("Percentage").map(|v| v as u8)
     }
 
-    pub fn ping(&self) -> Result<(), Error> {
-        self.connection_path().ping().map_err(Error::Ping)
-    }
+    pub fn ping(&self) -> Result<(), Error> { self.connection_path().ping().map_err(Error::Ping) }
 
     /// Gets a list of all the releases for a specific device.
-    pub fn releases<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<BTreeSet<Release>, Error> {
+    pub fn releases<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
         self.get_device_method("GetReleases", device_id.as_ref().as_ref())
     }
 
@@ -496,7 +494,7 @@ impl Client {
     }
 
     /// Get a list of all the upgrades possible for a specific device.
-    pub fn upgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<BTreeSet<Release>, Error> {
+    pub fn upgrades<D: AsRef<DeviceId>>(&self, device_id: D) -> Result<Vec<Release>, Error> {
         self.get_device_method("GetUpgrades", device_id.as_ref().as_ref())
     }
 

@@ -116,7 +116,7 @@ impl From<u8> for VersionFormat {
 }
 
 /// The remote ID of a device.
-#[derive(Clone, Debug, Default, Shrinkwrap)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Shrinkwrap)]
 pub struct DeviceId(Box<str>);
 
 /// A device that is potentially-supported by fwupd.

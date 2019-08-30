@@ -175,39 +175,42 @@ impl Remote {
             .and_then(|modified| SystemTime::now().duration_since(modified).ok())
     }
 
+    fn local_cache(&self) -> PathBuf {
+        let file_name = Path::new(self.filename_cache.as_ref())
+            .file_name()
+            .expect("remote filename cache does not have a file name");
+        cache_path(Path::new(file_name))
+    }
+
     fn update_file(
         &self,
         client: &reqwest::Client,
         uri: &str,
     ) -> Result<Option<File>, UpdateError> {
-        let system_cache = Path::new(self.filename_cache.as_ref());
+        let local_cache = &self.local_cache();
 
-        if system_cache.exists() && self.checksum.is_some() {
+        if local_cache.exists() && self.checksum.is_some() {
             let mut file = OpenOptions::new()
                 .read(true)
-                .open(system_cache)
-                .map_err(|why| UpdateError::Open(why, system_cache.to_path_buf()))?;
+                .open(local_cache)
+                .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
 
             let checksum = self.checksum.as_ref().unwrap();
             let checksum_matched =
                 validate_checksum(&mut file, checksum, checksum_guess_kind(checksum))
-                    .map_err(|why| UpdateError::Read(why, system_cache.to_path_buf()))?;
+                    .map_err(|why| UpdateError::Read(why, local_cache.to_path_buf()))?;
 
             if checksum_matched {
                 return Ok(None);
             }
         };
 
-        let cache: &Path = &cache_path(Path::new(
-            system_cache.file_name().expect("remote filename cache does not have a file name"),
-        ));
-
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(cache)
-            .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
+            .open(local_cache)
+            .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
 
         client
             .get(uri)

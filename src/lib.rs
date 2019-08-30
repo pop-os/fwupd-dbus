@@ -5,6 +5,8 @@ extern crate cascade;
 #[macro_use]
 extern crate err_derive;
 #[macro_use]
+extern crate log;
+#[macro_use]
 extern crate shrinkwraprs;
 
 mod common;
@@ -27,11 +29,11 @@ use progress_streams::ProgressWriter;
 use std::{
     borrow::Cow,
     collections::HashMap,
-    fs::{File, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, Seek, SeekFrom},
     iter::FromIterator,
     os::unix::io::IntoRawFd,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -142,6 +144,8 @@ pub enum Error {
     Ping(#[error(cause)] dbus::Error),
     #[error(display = "failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
+    #[error(display = "release does not have any checksums to validate firmware with")]
+    ReleaseWithoutChecksums,
     #[error(display = "remote not found")]
     RemoteNotFound,
 }
@@ -186,40 +190,35 @@ impl Client {
         self.get_device_method("GetDowngrades", device_id.as_ref().as_ref())
     }
 
-    /// Update firmware for a `Device` with the firmware specified in a `Release`.
-    pub fn update_device_with_release<F: FnMut(FlashEvent)>(
+    /// Fetches firmware from a remote and caches it for later use.
+    ///
+    /// Firmware will only be fetched if it has not already been cached, or the cached firmware has
+    /// an invalid checksum.
+    pub fn fetch_firmware_from_release<C: FnMut(FlashEvent)>(
         &self,
         client: &reqwest::Client,
         device: &Device,
         release: &Release,
-        mut flags: InstallFlags,
-        mut callback: Option<F>,
-    ) -> Result<(), Error> {
+        mut callback: Option<C>,
+    ) -> Result<(PathBuf, Option<File>), Error> {
         let remote = self.remote(release)?;
 
-        // Local and directory remotes already have the firmware.
-        let filename: Option<Cow<'_, Path>> = match remote.kind {
-            RemoteKind::Local => Some(Cow::Owned(
-                Path::new(remote.filename_cache.as_ref())
-                    .parent()
-                    .expect("remote filename cache without parent")
-                    .join(Path::new(release.uri.as_ref())),
-            )),
-            RemoteKind::Directory => Some(Cow::Borrowed(Path::new(&release.uri[7..]))),
-            _ => None,
-        };
+        // If remote is local, we already have the firmware.
+        {
+            let filename: Option<Cow<'_, Path>> = match remote.kind {
+                RemoteKind::Local => Some(Cow::Owned(
+                    Path::new(remote.filename_cache.as_ref())
+                        .parent()
+                        .expect("remote filename cache without parent")
+                        .join(Path::new(release.uri.as_ref())),
+                )),
+                RemoteKind::Directory => Some(Cow::Borrowed(Path::new(&release.uri[7..]))),
+                _ => None,
+            };
 
-        if let Some(filename) = filename {
-            if let Some(ref mut cb) = callback {
-                cb(FlashEvent::FlashInProgress);
+            if let Some(filename) = filename {
+                return Ok((filename.to_path_buf(), None));
             }
-
-            self.install(&device, "(user)", &filename, None::<File>, flags)?;
-            return Ok(());
-        }
-
-        if let Some(ref mut cb) = callback {
-            cb(FlashEvent::DownloadInitiate(release.size));
         }
 
         // Create URI, substituting if required.
@@ -232,63 +231,118 @@ impl Client {
             req_builder = req_builder.basic_auth(username, remote.password.as_ref());
         }
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&file_path)
-            .map_err(Error::FirmwareCreate)?;
+        let (checksum, algorithm) =
+            common::find_best_checksum(&release.checksums).ok_or(Error::ReleaseWithoutChecksums)?;
 
-        eprintln!("downloading {} for {}...", release.version, device.name);
-        let mut response = req_builder
-            .send()
-            .map_err(Error::FirmwareGet)?
-            .error_for_status()
-            .map_err(Error::FirmwareGet)?;
-
-        let result = match callback {
-            Some(ref mut callback) => {
-                let mut writer = ProgressWriter::new(&mut file, |progress| {
-                    callback(FlashEvent::DownloadUpdate(progress))
-                });
-
-                let result = io::copy(&mut response, &mut writer);
-                callback(FlashEvent::DownloadComplete);
-                result
+        // Closure for downloading the firmware to our file, and then validating that it is correct.
+        let download_and_verify = |mut file: &mut File| {
+            info!("downloading firmware for {} ({})...", device.name, release.version);
+            if let Some(ref mut cb) = callback {
+                cb(FlashEvent::DownloadInitiate(release.size));
             }
-            None => io::copy(&mut response, &mut file),
-        };
 
-        result.map_err(Error::FirmwareCopy)?;
+            let mut response = req_builder
+                .send()
+                .map_err(Error::FirmwareGet)?
+                .error_for_status()
+                .map_err(Error::FirmwareGet)?;
 
-        file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+            let result = match callback {
+                Some(ref mut callback) => {
+                    let mut writer = ProgressWriter::new(&mut file, |progress| {
+                        callback(FlashEvent::DownloadUpdate(progress))
+                    });
 
-        if let Some(ref mut cb) = callback {
-            cb(FlashEvent::VerifyingChecksum);
-        }
+                    let result = io::copy(&mut response, &mut writer);
+                    callback(FlashEvent::DownloadComplete);
+                    result
+                }
+                None => io::copy(&mut response, file),
+            };
 
-        if let Some((checksum, algorithm)) = common::find_best_checksum(&release.checksums) {
-            let checksum_matched = common::validate_checksum(&mut file, checksum, algorithm)
+            result.map_err(Error::FirmwareCopy)?;
+
+            file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+
+            if let Some(ref mut cb) = callback {
+                cb(FlashEvent::VerifyingChecksum);
+            }
+
+            info!("validating firmware for {} ({})", device.name, release.version);
+            let checksum_matched = common::validate_checksum(file, checksum, algorithm)
                 .map_err(Error::FirmwareRead)?;
 
             if !checksum_matched {
                 return Err(Error::FirmwareChecksumMismatch);
             }
+
+            Ok(())
+        };
+
+        let mut file = None;
+
+        // If the firmware does not exist, or the checksum is invalid, it will need to be fetched.
+        let firmware_requires_fetching = if file_path.exists() {
+            info!("validating firmware for {} ({})", device.name, release.version);
+            let mut cache =
+                OpenOptions::new().read(true).open(&file_path).map_err(Error::FirmwareOpen)?;
+
+            let result =
+                !common::validate_checksum(&mut cache, checksum, algorithm).unwrap_or(false);
+
+            file = Some(cache);
+            result
+        } else {
+            true
+        };
+
+        if firmware_requires_fetching {
+            let mut download = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&file_path)
+                .map_err(Error::FirmwareCreate)?;
+
+            // If any error occurs when downloading or verifying, delete the file that we created.
+            if let Err(why) = download_and_verify(&mut download) {
+                drop(download);
+                let _ = fs::remove_file(&file_path);
+                return Err(why);
+            }
+
+            file = Some(download);
         }
 
-        file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+        if let Some(ref mut file) = file {
+            file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+        }
 
+        Ok((file_path, file))
+    }
+
+    /// Update firmware for a `Device` with the firmware specified in a `Release`.
+    pub fn update_device_with_release<F: FnMut(FlashEvent)>(
+        &self,
+        client: &reqwest::Client,
+        device: &Device,
+        release: &Release,
+        mut flags: InstallFlags,
+        mut callback: Option<F>,
+    ) -> Result<(), Error> {
         if device.only_offline() {
             flags |= InstallFlags::OFFLINE;
         }
+
+        let (filename, file) =
+            self.fetch_firmware_from_release(client, device, release, callback.as_mut())?;
 
         if let Some(ref mut cb) = callback {
             cb(FlashEvent::FlashInProgress);
         }
 
-        self.install(&device, "(user)", &file_path, Some(file), flags)?;
-
-        Ok(())
+        info!("installing firmware for {} ({})", device.name, release.version);
+        self.install(device, "(user)", &filename, file, flags)
     }
 
     /// Gets a list of all the past firmware updates.

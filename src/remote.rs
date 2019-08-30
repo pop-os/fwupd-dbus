@@ -169,7 +169,7 @@ impl Remote {
 
     /// Fetch the time since the last update, if such a time can be fetched.
     pub fn time_since_last_update(&self) -> Option<Duration> {
-        metadata(self.filename_cache.as_ref())
+        metadata(&self.local_cache())
             .and_then(|md| md.modified())
             .ok()
             .and_then(|modified| SystemTime::now().duration_since(modified).ok())

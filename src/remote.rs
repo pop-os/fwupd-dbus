@@ -169,17 +169,18 @@ impl Remote {
 
     /// Fetch the time since the last update, if such a time can be fetched.
     pub fn time_since_last_update(&self) -> Option<Duration> {
-        metadata(&self.local_cache())
+        metadata(&self.local_cache(self.filename_cache.as_ref()))
             .and_then(|md| md.modified())
             .ok()
             .and_then(|modified| SystemTime::now().duration_since(modified).ok())
     }
 
-    fn local_cache(&self) -> PathBuf {
-        let file_name = Path::new(self.filename_cache.as_ref())
-            .file_name()
-            .expect("remote filename cache does not have a file name");
-        cache_path(Path::new(file_name))
+    fn local_cache(&self, file: &str) -> PathBuf {
+        let file_name =
+            Path::new(file).file_name().expect("remote filename cache does not have a file name");
+
+        let id: &str = &*self.remote_id;
+        cache_path(&Path::new(id).join(file_name))
     }
 
     fn update_file(
@@ -187,7 +188,7 @@ impl Remote {
         client: &reqwest::Client,
         uri: &str,
     ) -> Result<Option<File>, UpdateError> {
-        let local_cache = &self.local_cache();
+        let local_cache = &self.local_cache(self.filename_cache.as_ref());
 
         if local_cache.exists() && self.checksum.is_some() {
             let mut file = OpenOptions::new()
@@ -227,11 +228,7 @@ impl Remote {
     }
 
     fn update_signature(&self, client: &reqwest::Client, uri: &str) -> Result<File, UpdateError> {
-        let path = [self.filename_cache.as_ref(), ".asc"].concat();
-        let cache = Path::new(path.as_str());
-        let cache: &Path = &cache_path(Path::new(
-            cache.file_name().expect("remote filename cache does not have a file name"),
-        ));
+        let cache = &self.local_cache(&[self.filename_cache.as_ref(), ".asc"].concat());
 
         let mut file = OpenOptions::new()
             .read(true)

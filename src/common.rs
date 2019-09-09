@@ -66,7 +66,7 @@ pub fn cache_path(file: &Path) -> PathBuf {
     xdg::BaseDirectories::with_prefix("fwupd-client")
         .expect("failed to get XDG base directories")
         .place_cache_file(file)
-        .expect(&format!("failed to place {:?} in cache", file))
+        .unwrap_or_else(|why| panic!("failed to place {:?} in cache: {}", file, why))
 }
 
 pub const KEY_APPSTREAM_ID: &str = "AppstreamId"; // s

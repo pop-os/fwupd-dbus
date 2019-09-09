@@ -6,7 +6,7 @@ bitflags! {
     /// Describes attributes of a device.
     pub struct DeviceFlags: u64 {
         /// Device cannot be removed easily
-        const INTERNAL               = 1 << 0;
+        const INTERNAL               = 1;
         /// Device is updatable in this or any other mode
         const UPDATABLE              = 1 << 1;
         /// Update can only be done from offline mode
@@ -184,7 +184,7 @@ impl FromIterator<DBusEntry> for Device {
             let key = key.as_str();
             match key {
                 KEY_CHECKSUM => device.checksum = Some(dbus_str(&value, key).into()),
-                KEY_CREATED => device.created = dbus_u64(&value, key).into(),
+                KEY_CREATED => device.created = dbus_u64(&value, key),
                 KEY_DESCRIPTION => device.description = Some(dbus_str(&value, key).into()),
                 KEY_DEVICE_ID => device.device_id = DeviceId(dbus_str(&value, key).into()),
                 KEY_FLAGS => device.flags = DeviceFlags::from_bits_truncate(dbus_u64(&value, key)),

@@ -135,7 +135,7 @@ impl Remote {
     pub(crate) fn firmware_uri(&self, url: &str) -> Url {
         let uri = if let Some(ref firmware_base_uri) = self.firmware_base_uri {
             let mut firmware_base_uri: &str = firmware_base_uri;
-            if firmware_base_uri.ends_with("/") {
+            if firmware_base_uri.ends_with('/') {
                 firmware_base_uri = &firmware_base_uri[..firmware_base_uri.len() - 1];
             }
 
@@ -147,7 +147,7 @@ impl Remote {
 
             Cow::Owned([firmware_base_uri, "/", basename].concat())
         // Use the base URI of the metadata to build the full path.
-        } else if !url.contains("/") {
+        } else if !url.contains('/') {
             let remote_uri: &str = self.uri.as_ref().expect("remote URI without URI");
             let mut dirname = Path::new(remote_uri)
                 .parent()
@@ -156,7 +156,7 @@ impl Remote {
                 .to_str()
                 .expect("metadata URI is not UTF-8");
 
-            if dirname.ends_with("/") {
+            if dirname.ends_with('/') {
                 dirname = &dirname[..dirname.len() - 1];
             }
 
@@ -247,7 +247,7 @@ impl Remote {
             .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
 
         client
-            .get_request(http, [uri.as_ref(), ".asc"].concat().as_str())
+            .get_request(http, [uri, ".asc"].concat().as_str())
             .map_err(UpdateError::UserAgent)?
             .send()
             .map_err(UpdateError::Get)?

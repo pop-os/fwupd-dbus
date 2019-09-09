@@ -5,7 +5,7 @@ use std::{cmp::Ordering, iter::FromIterator};
 bitflags! {
     /// Describes attributes of a release.
     pub struct ReleaseFlags: u64 {
-        const TRUSTED_PAYLOAD  = 1 << 0;
+        const TRUSTED_PAYLOAD  = 1;
         const TRUSTED_METADATA = 1 << 1;
         const IS_UPGRADE       = 1 << 2;
         const IS_DOWNGRADE     = 1 << 3;
@@ -22,7 +22,7 @@ impl Default for ReleaseFlags {
 bitflags! {
     /// Describes trust levels for the payload and/or metadata.
     pub struct TrustFlags: u64 {
-        const PAYLOAD  = 1 << 0;
+        const PAYLOAD  = 1;
         const METADATA = 1 << 1;
     }
 }

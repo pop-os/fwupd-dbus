@@ -50,13 +50,13 @@ pub const DBUS_PATH: &str = "/";
 
 const TIMEOUT: i32 = -1;
 
-pub type DynVariant = Variant<Box<RefArg + 'static>>;
+pub type DynVariant = Variant<Box<dyn RefArg + 'static>>;
 pub type DBusEntry = (String, DynVariant);
 
 bitflags! {
     /// Controls the behavior of the install method.
     pub struct InstallFlags: u8 {
-        const OFFLINE         = 1 << 0;
+        const OFFLINE         = 1;
         const ALLOW_REINSTALL = 1 << 1;
         const ALLOW_OLDER     = 1 << 2;
         const FORCE           = 1 << 3;
@@ -361,7 +361,7 @@ impl Client {
     }
 
     /// Schedules a firmware to be installed.
-    pub fn install<'a, D: AsRef<DeviceId>, H: IntoRawFd>(
+    pub fn install<D: AsRef<DeviceId>, H: IntoRawFd>(
         &self,
         id: D,
         reason: &str,
@@ -429,7 +429,7 @@ impl Client {
             signal: Message,
             method: &'static str,
         ) -> Result<T, Error> {
-            let iter: Dict<String, Variant<Box<RefArg + 'static>>, _> =
+            let iter: Dict<String, Variant<Box<dyn RefArg + 'static>>, _> =
                 signal.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
             Ok(T::from_iter(iter))
@@ -520,7 +520,7 @@ impl Client {
     pub fn results<D: AsRef<DeviceId>>(&self, id: D) -> Result<Option<Device>, Error> {
         let id: &str = id.as_ref().as_ref();
         let message = self.call_method("GetResults", |m| m.append1(id))?;
-        let iter: Option<Dict<String, Variant<Box<RefArg + 'static>>, _>> = message.get1();
+        let iter: Option<Dict<String, Variant<Box<dyn RefArg + 'static>>, _>> = message.get1();
         Ok(iter.map(Device::from_iter))
     }
 
@@ -594,7 +594,7 @@ impl Client {
         method: &'static str,
     ) -> Result<Vec<T>, Error> {
         let message = self.call_method(method, |m| m)?;
-        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
+        let iter: Array<Dict<String, Variant<Box<dyn RefArg + 'static>>, _>, _> =
             message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
         Ok(iter.map(T::from_iter).collect())
@@ -606,7 +606,7 @@ impl Client {
         device_id: &str,
     ) -> Result<C, Error> {
         let message = self.call_method(method, |m| m.append1(device_id))?;
-        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
+        let iter: Array<Dict<String, Variant<Box<dyn RefArg + 'static>>, _>, _> =
             message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
         Ok(C::from_iter(iter.map(T::from_iter)))
@@ -620,7 +620,7 @@ impl Client {
         let cb = move |m: Message| m.append1(OwnedFd::new(handle.into_raw_fd()));
 
         let message = self.call_method(method, cb)?;
-        let iter: Array<Dict<String, Variant<Box<RefArg + 'static>>, _>, _> =
+        let iter: Array<Dict<String, Variant<Box<dyn RefArg + 'static>>, _>, _> =
             message.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
 
         Ok(iter.map(T::from_iter).collect())
@@ -645,7 +645,7 @@ impl Client {
         self.send_with_reply_and_block(m, TIMEOUT).map_err(|why| Error::Call(method, why))
     }
 
-    fn connection_path<'a>(&'a self) -> ConnPath<'a, &'a Connection> {
+    fn connection_path(&self) -> ConnPath<&Connection> {
         self.with_path(DBUS_NAME, DBUS_PATH, TIMEOUT)
     }
 

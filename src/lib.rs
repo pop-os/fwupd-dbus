@@ -26,6 +26,10 @@ use dbus::{
 
 use dbus::stdintf::org_freedesktop_dbus::Properties;
 use progress_streams::ProgressWriter;
+use reqwest::{
+    header::{HeaderValue, USER_AGENT},
+    Client as HttpClient, IntoUrl,
+};
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -36,7 +40,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, RwLock,
     },
 };
 
@@ -152,11 +156,17 @@ pub enum Error {
 
 /// A DBus client for interacting with the fwupd daemon.
 #[derive(Shrinkwrap)]
-pub struct Client(dbus::Connection);
+pub struct Client {
+    #[shrinkwrap(main_field)]
+    connection: dbus::Connection,
+    user_agent: RwLock<Option<Box<str>>>,
+}
 
 impl Client {
     pub fn new() -> Result<Self, Error> {
-        Connection::get_private(BusType::System).map(Self).map_err(Error::Connection)
+        Connection::get_private(BusType::System)
+            .map_err(Error::Connection)
+            .map(|connection| Self { connection, user_agent: RwLock::new(None) })
     }
 
     /// Activate a firmware update on the device.
@@ -196,7 +206,7 @@ impl Client {
     /// an invalid checksum.
     pub fn fetch_firmware_from_release<C: FnMut(FlashEvent)>(
         &self,
-        client: &reqwest::Client,
+        client: &HttpClient,
         device: &Device,
         release: &Release,
         mut callback: Option<C>,
@@ -224,7 +234,7 @@ impl Client {
         // Create URI, substituting if required.
         let uri = remote.firmware_uri(&release.uri);
         let file_path = common::cache_path_from_uri(&uri);
-        let mut req_builder = client.get(uri);
+        let mut req_builder = self.get_request(client, uri)?;
 
         // Set the username and password.
         if let Some(ref username) = remote.username {
@@ -324,7 +334,7 @@ impl Client {
     /// Update firmware for a `Device` with the firmware specified in a `Release`.
     pub fn update_device_with_release<F: FnMut(FlashEvent)>(
         &self,
-        client: &reqwest::Client,
+        client: &HttpClient,
         device: &Device,
         release: &Release,
         mut flags: InstallFlags,
@@ -568,6 +578,17 @@ impl Client {
         Ok(())
     }
 
+    /// Convenience method for creating a GET request with the proper user agent.
+    fn get_request(
+        &self,
+        client: &HttpClient,
+        uri: impl IntoUrl,
+    ) -> Result<reqwest::RequestBuilder, Error> {
+        self.user_agent(|user_agent| {
+            Ok(client.get(uri).header(USER_AGENT, HeaderValue::from_str(user_agent).unwrap()))
+        })
+    }
+
     fn get_method<T: FromIterator<DBusEntry>>(
         &self,
         method: &'static str,
@@ -626,6 +647,31 @@ impl Client {
 
     fn connection_path<'a>(&'a self) -> ConnPath<'a, &'a Connection> {
         self.with_path(DBUS_NAME, DBUS_PATH, TIMEOUT)
+    }
+
+    fn user_agent<T, F: FnOnce(&str) -> Result<T, Error>>(&self, func: F) -> Result<T, Error> {
+        let mut previously_called = false;
+        let user_agent: Box<str>;
+
+        let value = {
+            let lock = self.user_agent.read().unwrap();
+
+            user_agent = match *lock {
+                Some(ref agent) => {
+                    previously_called = true;
+                    agent.clone()
+                }
+                None => ["fwupd/", &*self.daemon_version()?].concat().into(),
+            };
+
+            func(&user_agent)?
+        };
+
+        if !previously_called {
+            *self.user_agent.write().unwrap() = Some(user_agent);
+        }
+
+        Ok(value)
     }
 }
 

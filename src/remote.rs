@@ -82,6 +82,8 @@ pub enum UpdateError {
     Seek(#[error(cause)] io::Error),
     #[error(display = "failed to truncate firmware metadata file")]
     Truncate(#[error(cause)] io::Error),
+    #[error(display = "failed to get fwupd user agent")]
+    UserAgent(#[error(cause)] crate::Error),
 }
 
 /// The remote ID of a remote.
@@ -122,8 +124,8 @@ impl Remote {
         }
 
         let uri = self.uri.as_ref().ok_or(UpdateError::NoUri)?;
-        if let Some(file) = self.update_file(http_client, uri)? {
-            let sig = self.update_signature(http_client, uri)?;
+        if let Some(file) = self.update_file(client, http_client, uri)? {
+            let sig = self.update_signature(client, http_client, uri)?;
             client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
         }
 
@@ -185,7 +187,8 @@ impl Remote {
 
     fn update_file(
         &self,
-        client: &reqwest::Client,
+        client: &Client,
+        http: &reqwest::Client,
         uri: &str,
     ) -> Result<Option<File>, UpdateError> {
         let local_cache = &self.local_cache(self.filename_cache.as_ref());
@@ -214,7 +217,8 @@ impl Remote {
             .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
 
         client
-            .get(uri)
+            .get_request(http, uri)
+            .map_err(UpdateError::UserAgent)?
             .send()
             .map_err(UpdateError::Get)?
             .error_for_status()
@@ -227,7 +231,12 @@ impl Remote {
         Ok(Some(file))
     }
 
-    fn update_signature(&self, client: &reqwest::Client, uri: &str) -> Result<File, UpdateError> {
+    fn update_signature(
+        &self,
+        client: &Client,
+        http: &reqwest::Client,
+        uri: &str,
+    ) -> Result<File, UpdateError> {
         let cache = &self.local_cache(&[self.filename_cache.as_ref(), ".asc"].concat());
 
         let mut file = OpenOptions::new()
@@ -238,7 +247,8 @@ impl Remote {
             .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
 
         client
-            .get([uri.as_ref(), ".asc"].concat().as_str())
+            .get_request(http, [uri.as_ref(), ".asc"].concat().as_str())
+            .map_err(UpdateError::UserAgent)?
             .send()
             .map_err(UpdateError::Get)?
             .error_for_status()

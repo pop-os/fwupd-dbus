@@ -649,26 +649,20 @@ impl Client {
         self.with_path(DBUS_NAME, DBUS_PATH, TIMEOUT)
     }
 
+    /// Fetch and cache the user agent in a thread-safe manner.
     fn user_agent<T, F: FnOnce(&str) -> Result<T, Error>>(&self, func: F) -> Result<T, Error> {
-        let mut previously_called = false;
-        let user_agent: Box<str>;
+        let lock = self.user_agent.read().unwrap();
 
-        let value = {
-            let lock = self.user_agent.read().unwrap();
-
-            user_agent = match *lock {
-                Some(ref agent) => {
-                    previously_called = true;
-                    agent.clone()
-                }
-                None => ["fwupd/", &*self.daemon_version()?].concat().into(),
-            };
-
-            func(&user_agent)?
+        let user_agent: Cow<str> = match *lock {
+            Some(ref agent) => Cow::Borrowed(agent.as_ref()),
+            None => Cow::Owned(["fwupd/", &*self.daemon_version()?].concat().into()),
         };
 
-        if !previously_called {
-            *self.user_agent.write().unwrap() = Some(user_agent);
+        let value = func(&user_agent)?;
+
+        if let Cow::Owned(user_agent) = user_agent {
+            drop(lock);
+            *self.user_agent.write().unwrap() = Some(user_agent.into());
         }
 
         Ok(value)

@@ -19,16 +19,18 @@ pub use self::{device::*, release::*, remote::*};
 
 use dbus::{
     self,
-    arg::{Arg, Array, Dict, Get, RefArg, Variant},
-    stdintf::org_freedesktop_dbus::Peer,
-    BusType, ConnPath, Connection, ConnectionItem, Message, OwnedFd,
+    arg::{Arg, Array, Dict, Get, OwnedFd, RefArg, Variant},
+    ffidisp::{
+        Connection, ConnectionItem, ConnPath,
+        stdintf::org_freedesktop_dbus::{Peer, Properties},
+    },
+    Message,
 };
 
-use dbus::stdintf::org_freedesktop_dbus::Properties;
 use progress_streams::ProgressWriter;
 use reqwest::{
     header::{HeaderValue, USER_AGENT},
-    Client as HttpClient, IntoUrl,
+    blocking::Client as HttpClient, IntoUrl,
 };
 use std::{
     borrow::Cow,
@@ -121,31 +123,31 @@ pub enum FlashEvent {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(display = "failed to add match on client connection")]
-    AddMatch(#[error(cause)] dbus::Error),
+    AddMatch(#[error(cause, no_from)] dbus::Error),
     #[error(display = "argument mismatch in {} method", _0)]
-    ArgumentMismatch(&'static str, #[error(cause)] dbus::arg::TypeMismatchError),
+    ArgumentMismatch(&'static str, #[error(cause, no_from)] dbus::arg::TypeMismatchError),
     #[error(display = "calling {} method failed", _0)]
-    Call(&'static str, #[error(cause)] dbus::Error),
+    Call(&'static str, #[error(cause, no_from)] dbus::Error),
     #[error(display = "unable to establish dbus connection")]
-    Connection(#[error(cause)] dbus::Error),
+    Connection(#[error(cause, no_from)] dbus::Error),
     #[error(display = "the remote firmware which was downloaded has an invalid checksum")]
     FirmwareChecksumMismatch,
     #[error(display = "failed to copy firmware file from remote")]
-    FirmwareCopy(#[error(case)] io::Error),
+    FirmwareCopy(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to create firmware file in user cache")]
-    FirmwareCreate(#[error(cause)] io::Error),
+    FirmwareCreate(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to GET firmware file from remote")]
-    FirmwareGet(#[error(cause)] reqwest::Error),
+    FirmwareGet(#[error(cause, no_from)] reqwest::Error),
     #[error(display = "failed to open firmware file")]
-    FirmwareOpen(#[error(cause)] io::Error),
+    FirmwareOpen(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to read firmware file")]
-    FirmwareRead(#[error(cause)] io::Error),
+    FirmwareRead(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to seek to beginning of firmware file")]
-    FirmwareSeek(#[error(cause)] io::Error),
+    FirmwareSeek(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to get property for {}", _0)]
-    GetProperty(&'static str, #[error(cause)] dbus::Error),
+    GetProperty(&'static str, #[error(cause, no_from)] dbus::Error),
     #[error(display = "unable to ping the dbus daemon")]
-    Ping(#[error(cause)] dbus::Error),
+    Ping(#[error(cause, no_from)] dbus::Error),
     #[error(display = "failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
     #[error(display = "release does not have any checksums to validate firmware with")]
@@ -158,13 +160,13 @@ pub enum Error {
 #[derive(Shrinkwrap)]
 pub struct Client {
     #[shrinkwrap(main_field)]
-    connection: dbus::Connection,
+    connection: Connection,
     user_agent: RwLock<Option<Box<str>>>,
 }
 
 impl Client {
     pub fn new() -> Result<Self, Error> {
-        Connection::get_private(BusType::System)
+        Connection::new_system()
             .map_err(Error::Connection)
             .map(|connection| Self { connection, user_agent: RwLock::new(None) })
     }
@@ -382,31 +384,29 @@ impl Client {
 
         let filename = filename.as_os_str().to_str().expect("filename is not UTF-8");
 
-        let options: Vec<(&str, DynVariant)> = cascade! {
-            opts: Vec::with_capacity(8);
-            ..push(("reason", Variant(Box::new(reason.to_owned()) as Box<dyn RefArg>)));
-            ..push(("filename", Variant(Box::new(filename.to_owned()) as Box<dyn RefArg>)));
+        let options: HashMap<&str, DynVariant> = cascade! {
+            opts: HashMap::new();
+            ..insert("reason", Variant(Box::new(reason.to_owned()) as Box<dyn RefArg>));
+            ..insert("filename", Variant(Box::new(filename.to_owned()) as Box<dyn RefArg>));
             | if flags.contains(InstallFlags::OFFLINE) {
-                opts.push(("offline", Variant(Box::new(true) as Box<dyn RefArg>)));
+                opts.insert("offline", Variant(Box::new(true) as Box<dyn RefArg>));
             };
             | if flags.contains(InstallFlags::ALLOW_OLDER) {
-                opts.push(("allow-older", Variant(Box::new(true) as Box<dyn RefArg>)));
+                opts.insert("allow-older", Variant(Box::new(true) as Box<dyn RefArg>));
             };
             | if flags.contains(InstallFlags::ALLOW_REINSTALL) {
-                opts.push(("allow-reinstall", Variant(Box::new(true) as Box<dyn RefArg>)));
+                opts.insert("allow-reinstall", Variant(Box::new(true) as Box<dyn RefArg>));
             };
             | if flags.contains(InstallFlags::FORCE) {
-                opts.push(("force", Variant(Box::new(true) as Box<dyn RefArg>)));
+                opts.insert("force", Variant(Box::new(true) as Box<dyn RefArg>));
             };
             | if flags.contains(InstallFlags::NO_HISTORY) {
-                opts.push(("no-history", Variant(Box::new(true) as Box<dyn RefArg>)));
+                opts.insert("no-history", Variant(Box::new(true) as Box<dyn RefArg>));
             };
         };
 
-        let options = Dict::new(options);
-
         let id: &str = id.as_ref().as_ref();
-        let cb = |m: Message| m.append3(id, OwnedFd::new(fd), options);
+        let cb = |m: Message| m.append3(id, unsafe { OwnedFd::new(fd) }, options);
 
         self.call_method(METHOD, cb)?;
         Ok(())
@@ -548,8 +548,8 @@ impl Client {
         let cb = |m: Message| {
             m.append3(
                 remote_id,
-                OwnedFd::new(data.into_raw_fd()),
-                OwnedFd::new(signature.into_raw_fd()),
+                unsafe { OwnedFd::new(data.into_raw_fd()) },
+                unsafe { OwnedFd::new(signature.into_raw_fd()) },
             )
         };
 
@@ -574,7 +574,7 @@ impl Client {
     }
 
     fn action_method(&self, method: &'static str, id: &str) -> Result<(), Error> {
-        self.call_method(method, |m| m.append(id))?;
+        self.call_method(method, |m| m.append1(id))?;
         Ok(())
     }
 
@@ -583,7 +583,7 @@ impl Client {
         &self,
         client: &HttpClient,
         uri: impl IntoUrl,
-    ) -> Result<reqwest::RequestBuilder, Error> {
+    ) -> Result<reqwest::blocking::RequestBuilder, Error> {
         self.user_agent(|user_agent| {
             Ok(client.get(uri).header(USER_AGENT, HeaderValue::from_str(user_agent).unwrap()))
         })
@@ -617,7 +617,7 @@ impl Client {
         method: &'static str,
         handle: H,
     ) -> Result<Vec<T>, Error> {
-        let cb = move |m: Message| m.append1(OwnedFd::new(handle.into_raw_fd()));
+        let cb = move |m: Message| m.append1(unsafe { OwnedFd::new(handle.into_raw_fd()) });
 
         let message = self.call_method(method, cb)?;
         let iter: Array<Dict<String, Variant<Box<dyn RefArg + 'static>>, _>, _> =

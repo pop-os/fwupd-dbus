@@ -65,25 +65,25 @@ impl Default for RemoteKind {
 #[derive(Debug, Error)]
 pub enum UpdateError {
     #[error(display = "fwupd client errored when updating metadata for remote")]
-    Client(#[error(cause)] crate::Error),
+    Client(#[error(cause, no_from)] crate::Error),
     #[error(display = "failed to copy firmware metadata from remote")]
-    Copy(#[error(cause)] reqwest::Error),
+    Copy(#[error(cause, no_from)] reqwest::Error),
     #[error(display = "failed to create parent directories for the remote's metadata cache")]
-    CreateParent(#[error(cause)] io::Error),
+    CreateParent(#[error(cause, no_from)] io::Error),
     #[error(display = "remote returned error when fetching firmware metadata")]
-    Get(#[error(cause)] reqwest::Error),
+    Get(#[error(cause, no_from)] reqwest::Error),
     #[error(display = "attempted to update a remote without a URI")]
     NoUri,
     #[error(display = "unable to open cached firmware metadata ({:?}) for remote", _1)]
-    Open(#[error(cause)] io::Error, PathBuf),
+    Open(#[error(cause, no_from)] io::Error, PathBuf),
     #[error(display = "failed to read the cached firmware metadata ({:?}) for remote", _1)]
-    Read(#[error(cause)] io::Error, PathBuf),
+    Read(#[error(cause, no_from)] io::Error, PathBuf),
     #[error(display = "failed to seek to beginning of firmware file")]
-    Seek(#[error(cause)] io::Error),
+    Seek(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to truncate firmware metadata file")]
-    Truncate(#[error(cause)] io::Error),
+    Truncate(#[error(cause, no_from)] io::Error),
     #[error(display = "failed to get fwupd user agent")]
-    UserAgent(#[error(cause)] crate::Error),
+    UserAgent(#[error(cause, no_from)] crate::Error),
 }
 
 /// The remote ID of a remote.
@@ -117,7 +117,7 @@ impl Remote {
     pub fn update_metadata(
         &self,
         client: &Client,
-        http_client: &reqwest::Client,
+        http_client: &reqwest::blocking::Client,
     ) -> Result<(), UpdateError> {
         if !self.enabled {
             return Ok(());
@@ -188,7 +188,7 @@ impl Remote {
     fn update_file(
         &self,
         client: &Client,
-        http: &reqwest::Client,
+        http: &reqwest::blocking::Client,
         uri: &str,
     ) -> Result<Option<File>, UpdateError> {
         let local_cache = &self.local_cache(self.filename_cache.as_ref());
@@ -234,7 +234,7 @@ impl Remote {
     fn update_signature(
         &self,
         client: &Client,
-        http: &reqwest::Client,
+        http: &reqwest::blocking::Client,
         uri: &str,
     ) -> Result<File, UpdateError> {
         let cache = &self.local_cache(&[self.filename_cache.as_ref(), ".asc"].concat());

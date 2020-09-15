@@ -5,6 +5,7 @@ authors = ["Michael Aaron Murphy <mmstick@pm.me>"]
 edition = "2018"
 license = "MIT"
 description = "fwupd dbus client bindings"
+repository = "https://github.com/pop-os/fwupd-dbus"
 
 [dependencies]
 dbus = "0.8.2"

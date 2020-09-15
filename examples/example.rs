@@ -72,7 +72,7 @@ fn main_() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let http_client = &reqwest::Client::new();
+    let http_client = &reqwest::blocking::Client::new();
 
     // Fetch a list of remotes, and update them.
     for remote in fwupd.remotes()? {

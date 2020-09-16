@@ -1,9 +1,8 @@
+use blocking::Unblock;
 use crypto_hash::{Algorithm, Hasher};
+use futures_lite::io::{self, AsyncReadExt as Read};
 use hex_view::HexView;
-use std::{
-    io::{self, Read},
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use url::Url;
 
 /// Based on libfwupd/fwupd-common.c
@@ -32,14 +31,14 @@ pub fn find_best_checksum<S: AsRef<str>>(checksums: &[S]) -> Option<(&str, Algor
     None
 }
 
-pub fn validate_checksum<R: Read>(
+pub async fn validate_checksum<R: Read + std::marker::Unpin>(
     data: &mut R,
     checksum: &str,
     alg: Algorithm,
 ) -> io::Result<bool> {
-    let mut hasher = Hasher::new(alg);
-    io::copy(data, &mut hasher)?;
-    let digest = format!("{:x}", HexView::from(hasher.finish().as_slice()));
+    let mut hasher = Unblock::new(Hasher::new(alg));
+    io::copy(data, &mut hasher).await?;
+    let digest = format!("{:x}", HexView::from(hasher.into_inner().await.finish().as_slice()));
     Ok(checksum == digest.as_str())
 }
 

@@ -1,13 +1,19 @@
 use crate::{common::*, dbus_helpers::*, Client, DBusEntry};
+
+use async_fs::{metadata, File, OpenOptions};
+use blocking::Unblock;
+use futures_lite::io::{self, AsyncSeekExt, SeekFrom};
+
 use dbus::arg::RefArg;
+
 use std::{
     borrow::Cow,
-    fs::{metadata, File, OpenOptions},
-    io::{self, Seek, SeekFrom},
     iter::FromIterator,
+    os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
+
 use url::Url;
 
 /// Describes the type of keyring to use with a remote.
@@ -64,26 +70,26 @@ impl Default for RemoteKind {
 /// An error that may occur when updating the metadata for a remote.
 #[derive(Debug, Error)]
 pub enum UpdateError {
-    #[error(display = "fwupd client errored when updating metadata for remote")]
-    Client(#[error(cause, no_from)] crate::Error),
-    #[error(display = "failed to copy firmware metadata from remote")]
-    Copy(#[error(cause, no_from)] reqwest::Error),
-    #[error(display = "failed to create parent directories for the remote's metadata cache")]
-    CreateParent(#[error(cause, no_from)] io::Error),
-    #[error(display = "remote returned error when fetching firmware metadata")]
-    Get(#[error(cause, no_from)] reqwest::Error),
-    #[error(display = "attempted to update a remote without a URI")]
+    #[error("fwupd client errored when updating metadata for remote")]
+    Client(#[source] crate::Error),
+    #[error("failed to copy firmware metadata from remote")]
+    Copy(#[source] io::Error),
+    #[error("failed to create parent directories for the remote's metadata cache")]
+    CreateParent(#[source] io::Error),
+    #[error("remote returned error when fetching firmware metadata")]
+    Get(#[source] reqwest::Error),
+    #[error("attempted to update a remote without a URI")]
     NoUri,
-    #[error(display = "unable to open cached firmware metadata ({:?}) for remote", _1)]
-    Open(#[error(cause, no_from)] io::Error, PathBuf),
-    #[error(display = "failed to read the cached firmware metadata ({:?}) for remote", _1)]
-    Read(#[error(cause, no_from)] io::Error, PathBuf),
-    #[error(display = "failed to seek to beginning of firmware file")]
-    Seek(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to truncate firmware metadata file")]
-    Truncate(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to get fwupd user agent")]
-    UserAgent(#[error(cause, no_from)] crate::Error),
+    #[error("unable to open cached firmware metadata ({:?}) for remote", _1)]
+    Open(#[source] io::Error, PathBuf),
+    #[error("failed to read the cached firmware metadata ({:?}) for remote", _1)]
+    Read(#[source] io::Error, PathBuf),
+    #[error("failed to seek to beginning of firmware file")]
+    Seek(#[source] io::Error),
+    #[error("failed to truncate firmware metadata file")]
+    Truncate(#[source] io::Error),
+    #[error("failed to get fwupd user agent")]
+    UserAgent(#[source] crate::Error),
 }
 
 /// The remote ID of a remote.
@@ -114,7 +120,7 @@ pub struct Remote {
 
 impl Remote {
     /// Updates the metadata for this remote.
-    pub fn update_metadata(
+    pub async fn update_metadata(
         &self,
         client: &Client,
         http_client: &reqwest::blocking::Client,
@@ -124,9 +130,11 @@ impl Remote {
         }
 
         let uri = self.uri.as_ref().ok_or(UpdateError::NoUri)?;
-        if let Some(file) = self.update_file(client, http_client, uri)? {
-            let sig = self.update_signature(client, http_client, uri)?;
-            client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
+        if let Some(file) = self.update_file(client, http_client, uri).await? {
+            let sig = self.update_signature(client, http_client, uri).await?;
+            client
+                .update_metadata(&self, file.as_raw_fd(), sig.as_raw_fd())
+                .map_err(UpdateError::Client)?;
         }
 
         Ok(())
@@ -170,8 +178,9 @@ impl Remote {
     }
 
     /// Fetch the time since the last update, if such a time can be fetched.
-    pub fn time_since_last_update(&self) -> Option<Duration> {
+    pub async fn time_since_last_update(&self) -> Option<Duration> {
         metadata(&self.local_cache(self.filename_cache.as_ref()))
+            .await
             .and_then(|md| md.modified())
             .ok()
             .and_then(|modified| SystemTime::now().duration_since(modified).ok())
@@ -185,7 +194,7 @@ impl Remote {
         cache_path(&Path::new(id).join(file_name))
     }
 
-    fn update_file(
+    async fn update_file(
         &self,
         client: &Client,
         http: &reqwest::blocking::Client,
@@ -197,11 +206,13 @@ impl Remote {
             let mut file = OpenOptions::new()
                 .read(true)
                 .open(local_cache)
+                .await
                 .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
 
             let checksum = self.checksum.as_ref().unwrap();
             let checksum_matched =
                 validate_checksum(&mut file, checksum, checksum_guess_kind(checksum))
+                    .await
                     .map_err(|why| UpdateError::Read(why, local_cache.to_path_buf()))?;
 
             if checksum_matched {
@@ -214,24 +225,27 @@ impl Remote {
             .write(true)
             .create(true)
             .open(local_cache)
+            .await
             .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
 
-        client
-            .get_request(http, uri)
-            .map_err(UpdateError::UserAgent)?
-            .send()
-            .map_err(UpdateError::Get)?
-            .error_for_status()
-            .map_err(UpdateError::Get)?
-            .copy_to(&mut file)
-            .map_err(UpdateError::Copy)?;
+        let mut reader = Unblock::new(
+            client
+                .get_request(http, uri)
+                .map_err(UpdateError::UserAgent)?
+                .send()
+                .map_err(UpdateError::Get)?
+                .error_for_status()
+                .map_err(UpdateError::Get)?,
+        );
 
-        file.seek(SeekFrom::Start(0)).map_err(UpdateError::Seek)?;
+        io::copy(&mut reader, &mut file).await.map_err(UpdateError::Copy)?;
+
+        file.seek(SeekFrom::Start(0)).await.map_err(UpdateError::Seek)?;
 
         Ok(Some(file))
     }
 
-    fn update_signature(
+    async fn update_signature(
         &self,
         client: &Client,
         http: &reqwest::blocking::Client,
@@ -244,19 +258,22 @@ impl Remote {
             .write(true)
             .create(true)
             .open(cache)
+            .await
             .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
 
-        client
-            .get_request(http, [uri, ".asc"].concat().as_str())
-            .map_err(UpdateError::UserAgent)?
-            .send()
-            .map_err(UpdateError::Get)?
-            .error_for_status()
-            .map_err(UpdateError::Get)?
-            .copy_to(&mut file)
-            .map_err(UpdateError::Copy)?;
+        let mut reader = Unblock::new(
+            client
+                .get_request(http, [uri, ".asc"].concat().as_str())
+                .map_err(UpdateError::UserAgent)?
+                .send()
+                .map_err(UpdateError::Get)?
+                .error_for_status()
+                .map_err(UpdateError::Get)?,
+        );
 
-        file.seek(SeekFrom::Start(0)).map_err(UpdateError::Seek)?;
+        io::copy(&mut reader, &mut file).await.map_err(UpdateError::Copy)?;
+
+        file.seek(SeekFrom::Start(0)).await.map_err(UpdateError::Seek)?;
 
         Ok(file)
     }

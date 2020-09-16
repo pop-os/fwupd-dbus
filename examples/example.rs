@@ -10,20 +10,22 @@ use std::{
 };
 
 fn main() {
-    if let Err(why) = main_() {
-        let mut error = format!("error: {}", why);
-        let mut cause = why.source();
-        while let Some(why) = cause {
-            error.push_str(&format!("\n    caused by: {}", why));
-            cause = why.source();
-        }
+    smol::block_on(async {
+        if let Err(why) = main_().await {
+            let mut error = format!("error: {}", why);
+            let mut cause = why.source();
+            while let Some(why) = cause {
+                error.push_str(&format!("\n    caused by: {}", why));
+                cause = why.source();
+            }
 
-        eprintln!("{}", error);
-        process::exit(1);
-    }
+            eprintln!("{}", error);
+            process::exit(1);
+        }
+    });
 }
 
-fn main_() -> Result<(), Box<dyn Error>> {
+async fn main_() -> Result<(), Box<dyn Error>> {
     // Atomic value used to stop the background thread.
     let cancellable = Arc::new(AtomicBool::new(false));
 
@@ -78,7 +80,7 @@ fn main_() -> Result<(), Box<dyn Error>> {
     for remote in fwupd.remotes()? {
         println!("{:#?}", remote);
 
-        remote.update_metadata(fwupd, http_client)?;
+        remote.update_metadata(fwupd, http_client).await?;
     }
 
     // Stop listening to signals in the background.

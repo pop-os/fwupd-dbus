@@ -3,7 +3,7 @@ extern crate bitflags;
 #[macro_use]
 extern crate cascade;
 #[macro_use]
-extern crate err_derive;
+extern crate thiserror;
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -17,28 +17,33 @@ mod remote;
 
 pub use self::{device::*, release::*, remote::*};
 
+use blocking::Unblock;
+
 use dbus::{
     self,
     arg::{Arg, Array, Dict, Get, OwnedFd, RefArg, Variant},
     ffidisp::{
-        Connection, ConnectionItem, ConnPath,
         stdintf::org_freedesktop_dbus::{Peer, Properties},
+        ConnPath, Connection, ConnectionItem,
     },
     Message,
 };
 
 use progress_streams::ProgressWriter;
 use reqwest::{
+    blocking::Client as HttpClient,
     header::{HeaderValue, USER_AGENT},
-    blocking::Client as HttpClient, IntoUrl,
+    IntoUrl,
 };
+
+use async_fs::{self as fs, File, OpenOptions};
+use futures_lite::io::{self as io, AsyncSeekExt};
+
 use std::{
     borrow::Cow,
     collections::HashMap,
-    fs::{self, File, OpenOptions},
-    io::{self, Seek, SeekFrom},
     iter::FromIterator,
-    os::unix::io::IntoRawFd,
+    os::unix::io::{AsRawFd, IntoRawFd, RawFd},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -122,37 +127,37 @@ pub enum FlashEvent {
 /// An error that may occur when using the client.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error(display = "failed to add match on client connection")]
-    AddMatch(#[error(cause, no_from)] dbus::Error),
-    #[error(display = "argument mismatch in {} method", _0)]
-    ArgumentMismatch(&'static str, #[error(cause, no_from)] dbus::arg::TypeMismatchError),
-    #[error(display = "calling {} method failed", _0)]
-    Call(&'static str, #[error(cause, no_from)] dbus::Error),
-    #[error(display = "unable to establish dbus connection")]
-    Connection(#[error(cause, no_from)] dbus::Error),
-    #[error(display = "the remote firmware which was downloaded has an invalid checksum")]
+    #[error("failed to add match on client connection")]
+    AddMatch(#[source] dbus::Error),
+    #[error("argument mismatch in {} method", _0)]
+    ArgumentMismatch(&'static str, #[source] dbus::arg::TypeMismatchError),
+    #[error("calling {} method failed", _0)]
+    Call(&'static str, #[source] dbus::Error),
+    #[error("unable to establish dbus connection")]
+    Connection(#[source] dbus::Error),
+    #[error("the remote firmware which was downloaded has an invalid checksum")]
     FirmwareChecksumMismatch,
-    #[error(display = "failed to copy firmware file from remote")]
-    FirmwareCopy(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to create firmware file in user cache")]
-    FirmwareCreate(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to GET firmware file from remote")]
-    FirmwareGet(#[error(cause, no_from)] reqwest::Error),
-    #[error(display = "failed to open firmware file")]
-    FirmwareOpen(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to read firmware file")]
-    FirmwareRead(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to seek to beginning of firmware file")]
-    FirmwareSeek(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to get property for {}", _0)]
-    GetProperty(&'static str, #[error(cause, no_from)] dbus::Error),
-    #[error(display = "unable to ping the dbus daemon")]
-    Ping(#[error(cause, no_from)] dbus::Error),
-    #[error(display = "failed to create {} method call", _0)]
+    #[error("failed to copy firmware file from remote")]
+    FirmwareCopy(#[source] io::Error),
+    #[error("failed to create firmware file in user cache")]
+    FirmwareCreate(#[source] io::Error),
+    #[error("failed to GET firmware file from remote")]
+    FirmwareGet(#[source] reqwest::Error),
+    #[error("failed to open firmware file")]
+    FirmwareOpen(#[source] io::Error),
+    #[error("failed to read firmware file")]
+    FirmwareRead(#[source] io::Error),
+    #[error("failed to seek to beginning of firmware file")]
+    FirmwareSeek(#[source] io::Error),
+    #[error("failed to get property for {}", _0)]
+    GetProperty(&'static str, #[source] dbus::Error),
+    #[error("unable to ping the dbus daemon")]
+    Ping(#[source] dbus::Error),
+    #[error("failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
-    #[error(display = "release does not have any checksums to validate firmware with")]
+    #[error("release does not have any checksums to validate firmware with")]
     ReleaseWithoutChecksums,
-    #[error(display = "remote not found")]
+    #[error("remote not found")]
     RemoteNotFound,
 }
 
@@ -206,7 +211,7 @@ impl Client {
     ///
     /// Firmware will only be fetched if it has not already been cached, or the cached firmware has
     /// an invalid checksum.
-    pub fn fetch_firmware_from_release<C: FnMut(FlashEvent)>(
+    pub async fn fetch_firmware_from_release<C: FnMut(FlashEvent)>(
         &self,
         client: &HttpClient,
         device: &Device,
@@ -247,7 +252,9 @@ impl Client {
             common::find_best_checksum(&release.checksums).ok_or(Error::ReleaseWithoutChecksums)?;
 
         // Closure for downloading the firmware to our file, and then validating that it is correct.
-        let download_and_verify = |mut file: &mut File| {
+        let download_and_verify = |mut file: std::fs::File| async move {
+            use std::io::{self, Seek, SeekFrom};
+
             info!("downloading firmware for {} ({})...", device.name, release.version);
             if let Some(ref mut cb) = callback {
                 cb(FlashEvent::DownloadInitiate(release.size));
@@ -269,7 +276,7 @@ impl Client {
                     callback(FlashEvent::DownloadComplete);
                     result
                 }
-                None => io::copy(&mut response, file),
+                None => io::copy(&mut response, &mut file),
             };
 
             result.map_err(Error::FirmwareCopy)?;
@@ -281,8 +288,10 @@ impl Client {
             }
 
             info!("validating firmware for {} ({})", device.name, release.version);
-            let checksum_matched = common::validate_checksum(file, checksum, algorithm)
-                .map_err(Error::FirmwareRead)?;
+            let checksum_matched =
+                common::validate_checksum(&mut Unblock::new(file), checksum, algorithm)
+                    .await
+                    .map_err(Error::FirmwareRead)?;
 
             if !checksum_matched {
                 return Err(Error::FirmwareChecksumMismatch);
@@ -296,11 +305,14 @@ impl Client {
         // If the firmware does not exist, or the checksum is invalid, it will need to be fetched.
         let firmware_requires_fetching = if file_path.exists() {
             info!("validating firmware for {} ({})", device.name, release.version);
-            let mut cache =
-                OpenOptions::new().read(true).open(&file_path).map_err(Error::FirmwareOpen)?;
+            let mut cache = OpenOptions::new()
+                .read(true)
+                .open(&file_path)
+                .await
+                .map_err(Error::FirmwareOpen)?;
 
             let result =
-                !common::validate_checksum(&mut cache, checksum, algorithm).unwrap_or(false);
+                !common::validate_checksum(&mut cache, checksum, algorithm).await.unwrap_or(false);
 
             file = Some(cache);
             result
@@ -309,7 +321,7 @@ impl Client {
         };
 
         if firmware_requires_fetching {
-            let mut download = OpenOptions::new()
+            let download = std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
@@ -317,24 +329,23 @@ impl Client {
                 .map_err(Error::FirmwareCreate)?;
 
             // If any error occurs when downloading or verifying, delete the file that we created.
-            if let Err(why) = download_and_verify(&mut download) {
-                drop(download);
+            if let Err(why) = download_and_verify(download.try_clone().unwrap()).await {
                 let _ = fs::remove_file(&file_path);
                 return Err(why);
             }
 
-            file = Some(download);
+            file = Some(download.into());
         }
 
         if let Some(ref mut file) = file {
-            file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
+            file.seek(io::SeekFrom::Start(0)).await.map_err(Error::FirmwareSeek)?;
         }
 
         Ok((file_path, file))
     }
 
     /// Update firmware for a `Device` with the firmware specified in a `Release`.
-    pub fn update_device_with_release<F: FnMut(FlashEvent)>(
+    pub async fn update_device_with_release<F: FnMut(FlashEvent)>(
         &self,
         client: &HttpClient,
         device: &Device,
@@ -347,14 +358,14 @@ impl Client {
         }
 
         let (filename, file) =
-            self.fetch_firmware_from_release(client, device, release, callback.as_mut())?;
+            self.fetch_firmware_from_release(client, device, release, callback.as_mut()).await?;
 
         if let Some(ref mut cb) = callback {
             cb(FlashEvent::FlashInProgress);
         }
 
         info!("installing firmware for {} ({})", device.name, release.version);
-        self.install(device, "(user)", &filename, file, flags)
+        self.install(device, "(user)", &filename, file.map(|f| f.as_raw_fd()), flags)
     }
 
     /// Gets a list of all the past firmware updates.
@@ -363,19 +374,19 @@ impl Client {
     }
 
     /// Schedules a firmware to be installed.
-    pub fn install<D: AsRef<DeviceId>, H: IntoRawFd>(
+    pub fn install<D: AsRef<DeviceId>>(
         &self,
         id: D,
         reason: &str,
         filename: &Path,
-        handle: Option<H>,
+        handle: Option<RawFd>,
         flags: InstallFlags,
     ) -> Result<(), Error> {
         const METHOD: &str = "Install";
 
         let fd = match handle {
-            Some(handle) => handle.into_raw_fd(),
-            None => OpenOptions::new()
+            Some(handle) => handle,
+            None => std::fs::OpenOptions::new()
                 .read(true)
                 .open(filename)
                 .map_err(Error::FirmwareOpen)?
@@ -538,19 +549,15 @@ impl Client {
     }
 
     /// Adds AppStream resource information from a session client.
-    pub fn update_metadata<D: IntoRawFd, S: IntoRawFd, R: AsRef<RemoteId>>(
+    pub fn update_metadata<R: AsRef<RemoteId>>(
         &self,
         remote_id: R,
-        data: D,
-        signature: S,
+        data: RawFd,
+        signature: RawFd,
     ) -> Result<(), Error> {
         let remote_id: &str = remote_id.as_ref().as_ref();
         let cb = |m: Message| {
-            m.append3(
-                remote_id,
-                unsafe { OwnedFd::new(data.into_raw_fd()) },
-                unsafe { OwnedFd::new(signature.into_raw_fd()) },
-            )
+            m.append3(remote_id, unsafe { OwnedFd::new(data) }, unsafe { OwnedFd::new(signature) })
         };
 
         self.call_method("UpdateMetadata", cb)?;

@@ -385,22 +385,22 @@ impl Client {
         let filename = filename.as_os_str().to_str().expect("filename is not UTF-8");
 
         let options: HashMap<&str, DynVariant> = cascade! {
-            opts: HashMap::new();
+            let opts = HashMap::new();
             ..insert("reason", Variant(Box::new(reason.to_owned()) as Box<dyn RefArg>));
             ..insert("filename", Variant(Box::new(filename.to_owned()) as Box<dyn RefArg>));
-            | if flags.contains(InstallFlags::OFFLINE) {
+            if flags.contains(InstallFlags::OFFLINE) {
                 opts.insert("offline", Variant(Box::new(true) as Box<dyn RefArg>));
             };
-            | if flags.contains(InstallFlags::ALLOW_OLDER) {
+            if flags.contains(InstallFlags::ALLOW_OLDER) {
                 opts.insert("allow-older", Variant(Box::new(true) as Box<dyn RefArg>));
             };
-            | if flags.contains(InstallFlags::ALLOW_REINSTALL) {
+            if flags.contains(InstallFlags::ALLOW_REINSTALL) {
                 opts.insert("allow-reinstall", Variant(Box::new(true) as Box<dyn RefArg>));
             };
-            | if flags.contains(InstallFlags::FORCE) {
+            if flags.contains(InstallFlags::FORCE) {
                 opts.insert("force", Variant(Box::new(true) as Box<dyn RefArg>));
             };
-            | if flags.contains(InstallFlags::NO_HISTORY) {
+            if flags.contains(InstallFlags::NO_HISTORY) {
                 opts.insert("no-history", Variant(Box::new(true) as Box<dyn RefArg>));
             };
         };

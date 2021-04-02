@@ -17,6 +17,7 @@ pub enum KeyringKind {
     None,
     GPG,
     PKCS7,
+    JCAT,
 }
 
 impl From<u8> for KeyringKind {
@@ -27,6 +28,7 @@ impl From<u8> for KeyringKind {
             1 => None,
             2 => GPG,
             3 => PKCS7,
+            4 => JCAT,
             _ => Unknown,
         }
     }
@@ -123,10 +125,11 @@ impl Remote {
             return Ok(());
         }
 
-        let uri = self.uri.as_ref().ok_or(UpdateError::NoUri)?;
-        if let Some(file) = self.update_file(client, http_client, uri)? {
-            let sig = self.update_signature(client, http_client, uri)?;
-            client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
+        if let Some(ref uri) = self.uri {
+            if let Some(file) = self.update_file(client, http_client, uri)? {
+                let sig = self.update_signature(client, http_client, uri)?;
+                client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
+            }
         }
 
         Ok(())
@@ -237,7 +240,13 @@ impl Remote {
         http: &reqwest::blocking::Client,
         uri: &str,
     ) -> Result<File, UpdateError> {
-        let cache = &self.local_cache(&[self.filename_cache.as_ref(), ".asc"].concat());
+        let extension = match self.keyring {
+            KeyringKind::JCAT => ".jcat",
+            KeyringKind::PKCS7 => ".p7b",
+            _ => ".asc"
+        };
+
+        let cache = &self.local_cache(&[self.filename_cache.as_ref(), extension].concat());
 
         let mut file = OpenOptions::new()
             .read(true)
@@ -247,7 +256,7 @@ impl Remote {
             .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
 
         client
-            .get_request(http, [uri, ".asc"].concat().as_str())
+            .get_request(http, [uri, extension].concat().as_str())
             .map_err(UpdateError::UserAgent)?
             .send()
             .map_err(UpdateError::Get)?

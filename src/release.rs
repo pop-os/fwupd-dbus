@@ -98,8 +98,14 @@ impl FromIterator<DBusEntry> for Release {
                     release.checksums = value
                         .as_iter()
                         .expect("Checksums is not a variant")
-                        // .flat_map(|array| array.as_iter().expect("Checksums is not an iterator"))
                         .map(|value| dbus_str(&value, key).into())
+                        .flat_map(|value: Box<str>| {
+                            if value.contains(',') {
+                                value.split(',').map(|x| x.into()).collect()
+                            } else {
+                                vec![value]
+                            }
+                        })
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }

@@ -66,26 +66,26 @@ impl Default for RemoteKind {
 /// An error that may occur when updating the metadata for a remote.
 #[derive(Debug, Error)]
 pub enum UpdateError {
-    #[error(display = "fwupd client errored when updating metadata for remote")]
-    Client(#[error(cause, no_from)] crate::Error),
-    #[error(display = "failed to copy firmware metadata from remote")]
-    Copy(#[error(cause, no_from)] reqwest::Error),
-    #[error(display = "failed to create parent directories for the remote's metadata cache")]
-    CreateParent(#[error(cause, no_from)] io::Error),
-    #[error(display = "remote returned error when fetching firmware metadata")]
-    Get(#[error(cause, no_from)] reqwest::Error),
-    #[error(display = "attempted to update a remote without a URI")]
+    #[error("fwupd client errored when updating metadata for remote")]
+    Client(#[source] crate::Error),
+    #[error("failed to write firmware metadata to disk")]
+    Copy(#[source] io::Error),
+    #[error("failed to create parent directories for the remote's metadata cache")]
+    CreateParent(#[source] io::Error),
+    #[error("remote returned error when fetching firmware metadata")]
+    Get(#[source] ureq::Error),
+    #[error("attempted to update a remote without a URI")]
     NoUri,
-    #[error(display = "unable to open cached firmware metadata ({:?}) for remote", _1)]
-    Open(#[error(cause, no_from)] io::Error, PathBuf),
-    #[error(display = "failed to read the cached firmware metadata ({:?}) for remote", _1)]
-    Read(#[error(cause, no_from)] io::Error, PathBuf),
-    #[error(display = "failed to seek to beginning of firmware file")]
-    Seek(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to truncate firmware metadata file")]
-    Truncate(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to get fwupd user agent")]
-    UserAgent(#[error(cause, no_from)] crate::Error),
+    #[error("unable to open cached firmware metadata ({:?}) for remote", _1)]
+    Open(#[source] io::Error, PathBuf),
+    #[error("failed to read the cached firmware metadata ({:?}) for remote", _1)]
+    Read(#[source] io::Error, PathBuf),
+    #[error("failed to seek to beginning of firmware file")]
+    Seek(#[source] io::Error),
+    #[error("failed to truncate firmware metadata file")]
+    Truncate(#[source] io::Error),
+    #[error("failed to get fwupd user agent")]
+    UserAgent(#[source] crate::Error),
 }
 
 /// The remote ID of a remote.
@@ -116,18 +116,14 @@ pub struct Remote {
 
 impl Remote {
     /// Updates the metadata for this remote.
-    pub fn update_metadata(
-        &self,
-        client: &Client,
-        http_client: &reqwest::blocking::Client,
-    ) -> Result<(), UpdateError> {
+    pub fn update_metadata(&self, client: &Client) -> Result<(), UpdateError> {
         if !self.enabled {
             return Ok(());
         }
 
         if let Some(ref uri) = self.uri {
-            if let Some(file) = self.update_file(client, http_client, uri)? {
-                let sig = self.update_signature(client, http_client, uri)?;
+            if let Some(file) = self.update_file(&client.http, uri)? {
+                let sig = self.update_signature(&client.http, uri)?;
                 client.update_metadata(&self, file, sig).map_err(UpdateError::Client)?;
             }
         }
@@ -188,82 +184,62 @@ impl Remote {
         cache_path(&Path::new(id).join(file_name))
     }
 
-    fn update_file(
-        &self,
-        client: &Client,
-        http: &reqwest::blocking::Client,
-        uri: &str,
-    ) -> Result<Option<File>, UpdateError> {
+    /// Fetch the latest firmware from the remote
+    fn update_file(&self, http: &ureq::Agent, uri: &str) -> Result<Option<File>, UpdateError> {
         let local_cache = &self.local_cache(self.filename_cache.as_ref());
+        let checksum = self.checksum.as_ref().unwrap();
 
         if local_cache.exists() && self.checksum.is_some() {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .open(local_cache)
-                .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
+            let checksum_matched = (|| {
+                let mut file = OpenOptions::new().read(true).open(local_cache)?;
 
-            let checksum = self.checksum.as_ref().unwrap();
-            let checksum_matched =
                 validate_checksum(&mut file, checksum, checksum_guess_kind(checksum))
-                    .map_err(|why| UpdateError::Read(why, local_cache.to_path_buf()))?;
+            })();
 
-            if checksum_matched {
+            if checksum_matched.is_ok() {
                 return Ok(None);
             }
         };
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(local_cache)
-            .map_err(|why| UpdateError::Open(why, local_cache.to_path_buf()))?;
-
-        client
-            .get_request(http, uri)
-            .map_err(UpdateError::UserAgent)?
-            .send()
-            .map_err(UpdateError::Get)?
-            .error_for_status()
-            .map_err(UpdateError::Get)?
-            .copy_to(&mut file)
-            .map_err(UpdateError::Copy)?;
-
-        file.seek(SeekFrom::Start(0)).map_err(UpdateError::Seek)?;
+        let file = Remote::fetch(http, uri, &local_cache)?;
 
         Ok(Some(file))
     }
 
-    fn update_signature(
-        &self,
-        client: &Client,
-        http: &reqwest::blocking::Client,
-        uri: &str,
-    ) -> Result<File, UpdateError> {
+    /// Fetch the latest signature for the remote
+    fn update_signature(&self, http: &ureq::Agent, uri: &str) -> Result<File, UpdateError> {
         let extension = match self.keyring {
             KeyringKind::JCAT => ".jcat",
             KeyringKind::PKCS7 => ".p7b",
-            _ => ".asc"
+            _ => ".asc",
         };
 
         let cache = &self.local_cache(&[self.filename_cache.as_ref(), extension].concat());
+        let uri = [uri, extension].concat();
 
+        Remote::fetch(http, &uri, &cache)
+    }
+
+    /// Fetch a file from a remote URI to disk
+    fn fetch(http: &ureq::Agent, uri: &str, file: &Path) -> Result<File, UpdateError> {
+        info!("fetching {} to {:?}", uri, file);
+
+        if file.exists() {
+            let _ = std::fs::remove_file(file);
+        }
+
+        // Open the file that we're going to write to
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(cache)
-            .map_err(|why| UpdateError::Open(why, cache.to_path_buf()))?;
+            .open(file)
+            .map_err(|why| UpdateError::Open(why, file.to_path_buf()))?;
 
-        client
-            .get_request(http, [uri, extension].concat().as_str())
-            .map_err(UpdateError::UserAgent)?
-            .send()
-            .map_err(UpdateError::Get)?
-            .error_for_status()
-            .map_err(UpdateError::Get)?
-            .copy_to(&mut file)
-            .map_err(UpdateError::Copy)?;
+        // Initiate connection to fetch firmware from remote
+        let mut resp = http.get(uri).call().map_err(UpdateError::Get)?.into_reader();
+
+        std::io::copy(&mut resp, &mut file).map_err(UpdateError::Copy)?;
 
         file.seek(SeekFrom::Start(0)).map_err(UpdateError::Seek)?;
 

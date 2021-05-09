@@ -3,7 +3,7 @@ extern crate bitflags;
 #[macro_use]
 extern crate cascade;
 #[macro_use]
-extern crate err_derive;
+extern crate thiserror;
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -17,32 +17,27 @@ mod remote;
 
 pub use self::{device::*, release::*, remote::*};
 
+use base64::write::EncoderWriter as Base64Encoder;
 use dbus::{
     self,
     arg::{Arg, Array, Dict, Get, OwnedFd, RefArg, Variant},
     ffidisp::{
-        Connection, ConnectionItem, ConnPath,
         stdintf::org_freedesktop_dbus::{Peer, Properties},
+        ConnPath, Connection, ConnectionItem,
     },
     Message,
-};
-
-use progress_streams::ProgressWriter;
-use reqwest::{
-    header::{HeaderValue, USER_AGENT},
-    blocking::Client as HttpClient, IntoUrl,
 };
 use std::{
     borrow::Cow,
     collections::HashMap,
     fs::{self, File, OpenOptions},
-    io::{self, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     iter::FromIterator,
     os::unix::io::IntoRawFd,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
+        Arc,
     },
 };
 
@@ -122,53 +117,61 @@ pub enum FlashEvent {
 /// An error that may occur when using the client.
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error(display = "failed to add match on client connection")]
-    AddMatch(#[error(cause, no_from)] dbus::Error),
-    #[error(display = "argument mismatch in {} method", _0)]
-    ArgumentMismatch(&'static str, #[error(cause, no_from)] dbus::arg::TypeMismatchError),
-    #[error(display = "calling {} method failed", _0)]
-    Call(&'static str, #[error(cause, no_from)] dbus::Error),
-    #[error(display = "unable to establish dbus connection")]
-    Connection(#[error(cause, no_from)] dbus::Error),
-    #[error(display = "the remote firmware which was downloaded has an invalid checksum")]
+    #[error("failed to add match on client connection")]
+    AddMatch(#[source] dbus::Error),
+    #[error("argument mismatch in {} method", _0)]
+    ArgumentMismatch(&'static str, #[source] dbus::arg::TypeMismatchError),
+    #[error("calling {} method failed", _0)]
+    Call(&'static str, #[source] dbus::Error),
+    #[error("unable to establish dbus connection")]
+    Connection(#[source] dbus::Error),
+    #[error("the remote firmware which was downloaded has an invalid checksum")]
     FirmwareChecksumMismatch,
-    #[error(display = "failed to copy firmware file from remote")]
-    FirmwareCopy(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to create firmware file in user cache")]
-    FirmwareCreate(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to GET firmware file from remote")]
-    FirmwareGet(#[error(cause, no_from)] reqwest::Error),
-    #[error(display = "failed to open firmware file")]
-    FirmwareOpen(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to read firmware file")]
-    FirmwareRead(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to seek to beginning of firmware file")]
-    FirmwareSeek(#[error(cause, no_from)] io::Error),
-    #[error(display = "failed to get property for {}", _0)]
-    GetProperty(&'static str, #[error(cause, no_from)] dbus::Error),
-    #[error(display = "unable to ping the dbus daemon")]
-    Ping(#[error(cause, no_from)] dbus::Error),
-    #[error(display = "failed to create {} method call", _0)]
+    #[error("failed to copy firmware file from remote")]
+    FirmwareCopy(#[source] io::Error),
+    #[error("failed to create firmware file in user cache")]
+    FirmwareCreate(#[source] io::Error),
+    #[error("failed to GET firmware file from remote")]
+    FirmwareGet(#[source] ureq::Error),
+    #[error("failed to open firmware file")]
+    FirmwareOpen(#[source] io::Error),
+    #[error("failed to read firmware file")]
+    FirmwareRead(#[source] io::Error),
+    #[error("failed to seek to beginning of firmware file")]
+    FirmwareSeek(#[source] io::Error),
+    #[error("failed to get property for {}", _0)]
+    GetProperty(&'static str, #[source] dbus::Error),
+    #[error("unable to ping the dbus daemon")]
+    Ping(#[source] dbus::Error),
+    #[error("failed to create {} method call", _0)]
     NewMethodCall(&'static str, String),
-    #[error(display = "release does not have any checksums to validate firmware with")]
+    #[error("release does not have any checksums to validate firmware with")]
     ReleaseWithoutChecksums,
-    #[error(display = "remote not found")]
+    #[error("remote not found")]
     RemoteNotFound,
 }
 
 /// A DBus client for interacting with the fwupd daemon.
-#[derive(Shrinkwrap)]
 pub struct Client {
-    #[shrinkwrap(main_field)]
     connection: Connection,
-    user_agent: RwLock<Option<Box<str>>>,
+
+    pub client_name: String,
+
+    http: ureq::Agent,
 }
 
 impl Client {
     pub fn new() -> Result<Self, Error> {
-        Connection::new_system()
-            .map_err(Error::Connection)
-            .map(|connection| Self { connection, user_agent: RwLock::new(None) })
+        let connection = Connection::new_system().map_err(Error::Connection)?;
+
+        let mut client = Self { connection, client_name: String::new(), http: ureq::Agent::new() };
+
+        // Reassign the user agent of our client
+        client.client_name = ["fwupd/", &*client.daemon_version()?].concat();
+
+        client.http = ureq::AgentBuilder::new().user_agent(&client.client_name.as_str()).build();
+
+        Ok(client)
     }
 
     /// Activate a firmware update on the device.
@@ -208,7 +211,6 @@ impl Client {
     /// an invalid checksum.
     pub fn fetch_firmware_from_release<C: FnMut(FlashEvent)>(
         &self,
-        client: &HttpClient,
         device: &Device,
         release: &Release,
         mut callback: Option<C>,
@@ -236,43 +238,67 @@ impl Client {
         // Create URI, substituting if required.
         let uri = remote.firmware_uri(&release.uri);
         let file_path = common::cache_path_from_uri(&uri);
-        let mut req_builder = self.get_request(client, uri)?;
+
+        let mut request = self.http.get(uri.to_string().as_str());
 
         // Set the username and password.
         if let Some(ref username) = remote.username {
-            req_builder = req_builder.basic_auth(username, remote.password.as_ref());
+            let password = remote.password.as_ref();
+
+            // Basic HTTP Auth
+            let mut header_value = b"Basic ".to_vec();
+
+            {
+                let mut encoder = Base64Encoder::new(&mut header_value, base64::STANDARD);
+                write!(encoder, "{}:", username).unwrap();
+                if let Some(password) = password {
+                    write!(encoder, "{}", password).unwrap();
+                }
+            }
+
+            if let Ok(value) = String::from_utf8(header_value) {
+                request = request.set("Authorization", &value);
+            }
         }
 
         let (checksum, algorithm) =
             common::find_best_checksum(&release.checksums).ok_or(Error::ReleaseWithoutChecksums)?;
 
         // Closure for downloading the firmware to our file, and then validating that it is correct.
-        let download_and_verify = |mut file: &mut File| {
+        let download_and_verify = |mut file: File| {
             info!("downloading firmware for {} ({})...", device.name, release.version);
             if let Some(ref mut cb) = callback {
                 cb(FlashEvent::DownloadInitiate(release.size));
             }
 
-            let mut response = req_builder
-                .send()
-                .map_err(Error::FirmwareGet)?
-                .error_for_status()
-                .map_err(Error::FirmwareGet)?;
+            let mut response = request.call().map_err(Error::FirmwareGet)?.into_reader();
 
-            let result = match callback {
+            match callback {
                 Some(ref mut callback) => {
-                    let mut writer = ProgressWriter::new(&mut file, |progress| {
-                        callback(FlashEvent::DownloadUpdate(progress))
-                    });
+                    let result = (|| {
+                        let mut progress = 0;
+                        let mut buffer = vec![0u8; 8192];
 
-                    let result = io::copy(&mut response, &mut writer);
+                        loop {
+                            let read = response.read(&mut buffer[..])?;
+                            if read == 0 {
+                                break;
+                            }
+                            file.write_all(&buffer[..read])?;
+                            progress += read;
+                            callback(FlashEvent::DownloadUpdate(progress))
+                        }
+
+                        Ok(file)
+                    })();
+
                     callback(FlashEvent::DownloadComplete);
-                    result
+                    file = result.map_err(Error::FirmwareCopy)?;
                 }
-                None => io::copy(&mut response, file),
+                None => {
+                    io::copy(&mut response, &mut file).map_err(Error::FirmwareCopy)?;
+                }
             };
-
-            result.map_err(Error::FirmwareCopy)?;
 
             file.seek(SeekFrom::Start(0)).map_err(Error::FirmwareSeek)?;
 
@@ -281,14 +307,13 @@ impl Client {
             }
 
             info!("validating firmware for {} ({})", device.name, release.version);
-            let checksum_matched = common::validate_checksum(file, checksum, algorithm)
-                .map_err(Error::FirmwareRead)?;
+            let checksum_matched = common::validate_checksum(&mut file, checksum, algorithm);
 
-            if !checksum_matched {
+            if checksum_matched.is_err() {
                 return Err(Error::FirmwareChecksumMismatch);
             }
 
-            Ok(())
+            Ok(file)
         };
 
         let mut file = None;
@@ -299,8 +324,7 @@ impl Client {
             let mut cache =
                 OpenOptions::new().read(true).open(&file_path).map_err(Error::FirmwareOpen)?;
 
-            let result =
-                !common::validate_checksum(&mut cache, checksum, algorithm).unwrap_or(false);
+            let result = common::validate_checksum(&mut cache, checksum, algorithm).is_err();
 
             file = Some(cache);
             result
@@ -309,7 +333,7 @@ impl Client {
         };
 
         if firmware_requires_fetching {
-            let mut download = OpenOptions::new()
+            let download = OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
@@ -317,11 +341,13 @@ impl Client {
                 .map_err(Error::FirmwareCreate)?;
 
             // If any error occurs when downloading or verifying, delete the file that we created.
-            if let Err(why) = download_and_verify(&mut download) {
-                drop(download);
-                let _ = fs::remove_file(&file_path);
-                return Err(why);
-            }
+            let download = match download_and_verify(download) {
+                Ok(download) => download,
+                Err(why) => {
+                    let _ = fs::remove_file(&file_path);
+                    return Err(why);
+                }
+            };
 
             file = Some(download);
         }
@@ -336,7 +362,6 @@ impl Client {
     /// Update firmware for a `Device` with the firmware specified in a `Release`.
     pub fn update_device_with_release<F: FnMut(FlashEvent)>(
         &self,
-        client: &HttpClient,
         device: &Device,
         release: &Release,
         mut flags: InstallFlags,
@@ -347,7 +372,7 @@ impl Client {
         }
 
         let (filename, file) =
-            self.fetch_firmware_from_release(client, device, release, callback.as_mut())?;
+            self.fetch_firmware_from_release(device, release, callback.as_mut())?;
 
         if let Some(ref mut cb) = callback {
             cb(FlashEvent::FlashInProgress);
@@ -435,7 +460,8 @@ impl Client {
             Ok(T::from_iter(iter))
         }
 
-        self.iter(TIMEOUT)
+        self.connection
+            .iter(TIMEOUT)
             .take_while(move |_| cancellable.load(Ordering::SeqCst))
             .filter_map(filter_signal)
             .filter_map(|signal| {
@@ -546,11 +572,9 @@ impl Client {
     ) -> Result<(), Error> {
         let remote_id: &str = remote_id.as_ref().as_ref();
         let cb = |m: Message| {
-            m.append3(
-                remote_id,
-                unsafe { OwnedFd::new(data.into_raw_fd()) },
-                unsafe { OwnedFd::new(signature.into_raw_fd()) },
-            )
+            m.append3(remote_id, unsafe { OwnedFd::new(data.into_raw_fd()) }, unsafe {
+                OwnedFd::new(signature.into_raw_fd())
+            })
         };
 
         self.call_method("UpdateMetadata", cb)?;
@@ -576,17 +600,6 @@ impl Client {
     fn action_method(&self, method: &'static str, id: &str) -> Result<(), Error> {
         self.call_method(method, |m| m.append1(id))?;
         Ok(())
-    }
-
-    /// Convenience method for creating a GET request with the proper user agent.
-    fn get_request(
-        &self,
-        client: &HttpClient,
-        uri: impl IntoUrl,
-    ) -> Result<reqwest::blocking::RequestBuilder, Error> {
-        self.user_agent(|user_agent| {
-            Ok(client.get(uri).header(USER_AGENT, HeaderValue::from_str(user_agent).unwrap()))
-        })
     }
 
     fn get_method<T: FromIterator<DBusEntry>>(
@@ -642,30 +655,13 @@ impl Client {
 
         m = append_args(m);
 
-        self.send_with_reply_and_block(m, TIMEOUT).map_err(|why| Error::Call(method, why))
+        self.connection
+            .send_with_reply_and_block(m, TIMEOUT)
+            .map_err(|why| Error::Call(method, why))
     }
 
     fn connection_path(&self) -> ConnPath<&Connection> {
-        self.with_path(DBUS_NAME, DBUS_PATH, TIMEOUT)
-    }
-
-    /// Fetch and cache the user agent in a thread-safe manner.
-    fn user_agent<T, F: FnOnce(&str) -> Result<T, Error>>(&self, func: F) -> Result<T, Error> {
-        let lock = self.user_agent.read().unwrap();
-
-        let user_agent: Cow<str> = match *lock {
-            Some(ref agent) => Cow::Borrowed(agent.as_ref()),
-            None => Cow::Owned(["fwupd/", &*self.daemon_version()?].concat().into()),
-        };
-
-        let value = func(&user_agent)?;
-
-        if let Cow::Owned(user_agent) = user_agent {
-            drop(lock);
-            *self.user_agent.write().unwrap() = Some(user_agent.into());
-        }
-
-        Ok(value)
+        self.connection.with_path(DBUS_NAME, DBUS_PATH, TIMEOUT)
     }
 }
 

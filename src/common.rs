@@ -32,15 +32,15 @@ pub fn find_best_checksum<S: AsRef<str>>(checksums: &[S]) -> Option<(&str, Algor
     None
 }
 
-pub fn validate_checksum<R: Read>(
-    data: &mut R,
-    checksum: &str,
-    alg: Algorithm,
-) -> io::Result<bool> {
+pub fn validate_checksum<R: Read>(data: &mut R, checksum: &str, alg: Algorithm) -> io::Result<()> {
     let mut hasher = Hasher::new(alg);
     io::copy(data, &mut hasher)?;
     let digest = format!("{:x}", HexView::from(hasher.finish().as_slice()));
-    Ok(checksum == digest.as_str())
+    if checksum == digest.as_str() {
+        Ok(())
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "checksum mismatch"))
+    }
 }
 
 pub fn cache_path_from_uri(uri: &Url) -> PathBuf {

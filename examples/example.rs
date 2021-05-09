@@ -72,13 +72,11 @@ fn main_() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let http_client = &reqwest::blocking::Client::new();
-
     // Fetch a list of remotes, and update them.
     for remote in fwupd.remotes()? {
         println!("{:#?}", remote);
 
-        remote.update_metadata(fwupd, http_client)?;
+        remote.update_metadata(fwupd)?;
     }
 
     // Stop listening to signals in the background.

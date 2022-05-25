@@ -1,6 +1,6 @@
 [package]
 name = "fwupd-dbus"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Michael Aaron Murphy <mmstick@pm.me>"]
 edition = "2018"
 license = "MIT"

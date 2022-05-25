@@ -7,6 +7,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 fn main() {
@@ -25,7 +26,7 @@ fn main() {
 
 fn main_() -> Result<(), Box<dyn Error>> {
     // Atomic value used to stop the background thread.
-    let cancellable = Arc::new(AtomicBool::new(false));
+    let cancellable = Arc::new(AtomicBool::new(true));
 
     // Begin listening to signals in the background
     listen_in_background(cancellable.clone());
@@ -42,7 +43,7 @@ fn main_() -> Result<(), Box<dyn Error>> {
 
     // Fetch a list of supported devices.
     for device in fwupd.devices()? {
-        println!("Device: {} {}", device.vendor, device.name);
+        println!("Device: {:#?}", device);
 
         if device.is_updateable() {
             if let Ok(upgrades) = fwupd.upgrades(&device) {
@@ -79,6 +80,10 @@ fn main_() -> Result<(), Box<dyn Error>> {
         remote.update_metadata(fwupd)?;
     }
 
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
     // Stop listening to signals in the background.
     cancellable.store(true, Ordering::SeqCst);
 
@@ -89,7 +94,8 @@ fn listen_in_background(cancellable: Arc<AtomicBool>) {
     thread::spawn(move || {
         if let Ok(fwupd) = Client::new() {
             // Listen for signals received by the daemon.
-            for signal in fwupd.listen_signals(cancellable) {
+            let signals = fwupd.listen_signals(cancellable).unwrap();
+            for signal in signals {
                 match signal {
                     Signal::Changed => {
                         println!("changed");
@@ -103,6 +109,9 @@ fn listen_in_background(cancellable: Arc<AtomicBool>) {
                     Signal::DeviceRemoved(device) => {
                         println!("device added: {:?}", device);
                     }
+                    Signal::DeviceRequest(request) => {
+                        println!("device request: {:?}", request);
+                    }
                     Signal::PropertiesChanged { interface, changed, invalidated } => {
                         println!(
                             "Properties of {} changed:\n changed: {:?}\n invalidated: {:?}",
@@ -112,5 +121,7 @@ fn listen_in_background(cancellable: Arc<AtomicBool>) {
                 }
             }
         }
+
+        eprintln!("STOPPED LISTENING");
     });
 }

@@ -201,7 +201,7 @@ impl Remote {
             }
         };
 
-        let file = Remote::fetch(http, uri, &local_cache)?;
+        let file = Remote::fetch(http, uri, local_cache)?;
 
         Ok(Some(file))
     }
@@ -217,7 +217,7 @@ impl Remote {
         let cache = &self.local_cache(&[self.filename_cache.as_ref(), extension].concat());
         let uri = [uri, extension].concat();
 
-        Remote::fetch(http, &uri, &cache)
+        Remote::fetch(http, &uri, cache)
     }
 
     /// Fetch a file from a remote URI to disk

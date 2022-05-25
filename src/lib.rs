@@ -14,6 +14,7 @@ mod dbus_helpers;
 mod device;
 mod release;
 mod remote;
+pub mod request;
 
 pub use self::{device::*, release::*, remote::*};
 
@@ -23,10 +24,11 @@ use dbus::{
     arg::{Arg, Array, Dict, Get, OwnedFd, RefArg, Variant},
     ffidisp::{
         stdintf::org_freedesktop_dbus::{Peer, Properties},
-        ConnPath, Connection, ConnectionItem,
+        ConnPath, Connection,
     },
     Message,
 };
+use request::Request;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -40,6 +42,7 @@ use std::{
         Arc,
     },
 };
+use zbus::zvariant::Value;
 
 pub const DBUS_NAME: &str = "org.freedesktop.fwupd";
 pub const DBUS_IFACE: &str = "org.freedesktop.fwupd";
@@ -52,12 +55,30 @@ pub type DBusEntry = (String, DynVariant);
 
 bitflags! {
     /// Controls the behavior of the install method.
-    pub struct InstallFlags: u8 {
-        const OFFLINE         = 1;
-        const ALLOW_REINSTALL = 1 << 1;
-        const ALLOW_OLDER     = 1 << 2;
-        const FORCE           = 1 << 3;
-        const NO_HISTORY      = 1 << 4;
+    pub struct InstallFlags: u16 {
+        const OFFLINE             = 1;
+        const ALLOW_REINSTALL     = 1 << 1;
+        const ALLOW_OLDER         = 1 << 2;
+        const FORCE               = 1 << 3;
+        const NO_HISTORY          = 1 << 4;
+        const ALLOW_BRANCH_SWITCH = 1 << 5;
+        const IGNORE_CHECKSUM     = 1 << 6;
+        const IGNORE_VID_PID      = 1 << 7;
+        const IGNORE_POWER        = 1 << 8;
+        const NO_SEARCH           = 1 << 9;
+    }
+}
+
+bitflags! {
+    /// Sets what features are supported by the client
+    pub struct FeatureFlags: u64 {
+        const CAN_REPORT = 1;
+        const DETACH_ACTION = 1 << 1;
+        const UPDATE_ACTION = 1 << 2;
+        const SWITCH_BRANCH = 1 << 3;
+        const REQUESTS = 1 << 4;
+        const FDE_WARNING = 1 << 5;
+        const COMMUNITY_TEXT = 1 << 6;
     }
 }
 
@@ -169,7 +190,7 @@ impl Client {
         // Reassign the user agent of our client
         client.client_name = ["fwupd/", &*client.daemon_version()?].concat();
 
-        client.http = ureq::AgentBuilder::new().user_agent(&client.client_name.as_str()).build();
+        client.http = ureq::AgentBuilder::new().user_agent(client.client_name.as_str()).build();
 
         Ok(client)
     }
@@ -409,26 +430,43 @@ impl Client {
 
         let filename = filename.as_os_str().to_str().expect("filename is not UTF-8");
 
-        let options: HashMap<&str, DynVariant> = cascade! {
-            let opts = HashMap::new();
+        let mut options: HashMap<&str, DynVariant> = cascade! {
+            HashMap::new();
             ..insert("reason", Variant(Box::new(reason.to_owned()) as Box<dyn RefArg>));
             ..insert("filename", Variant(Box::new(filename.to_owned()) as Box<dyn RefArg>));
-            if flags.contains(InstallFlags::OFFLINE) {
-                opts.insert("offline", Variant(Box::new(true) as Box<dyn RefArg>));
-            };
-            if flags.contains(InstallFlags::ALLOW_OLDER) {
-                opts.insert("allow-older", Variant(Box::new(true) as Box<dyn RefArg>));
-            };
-            if flags.contains(InstallFlags::ALLOW_REINSTALL) {
-                opts.insert("allow-reinstall", Variant(Box::new(true) as Box<dyn RefArg>));
-            };
-            if flags.contains(InstallFlags::FORCE) {
-                opts.insert("force", Variant(Box::new(true) as Box<dyn RefArg>));
-            };
-            if flags.contains(InstallFlags::NO_HISTORY) {
-                opts.insert("no-history", Variant(Box::new(true) as Box<dyn RefArg>));
-            };
         };
+
+        fn boolean_variant(value: bool) -> Variant<Box<dyn RefArg>> {
+            Variant(Box::new(value) as Box<dyn RefArg>)
+        }
+
+        if flags.contains(InstallFlags::OFFLINE) {
+            options.insert("offline", boolean_variant(true));
+        }
+
+        if flags.contains(InstallFlags::ALLOW_OLDER) {
+            options.insert("allow-older", boolean_variant(true));
+        }
+
+        if flags.contains(InstallFlags::ALLOW_REINSTALL) {
+            options.insert("allow-reinstall", boolean_variant(true));
+        }
+
+        if flags.contains(InstallFlags::ALLOW_BRANCH_SWITCH) {
+            options.insert("allow-branch-switch", boolean_variant(true));
+        }
+
+        if flags.contains(InstallFlags::FORCE) {
+            options.insert("force", boolean_variant(true));
+        }
+
+        if flags.contains(InstallFlags::IGNORE_POWER) {
+            options.insert("ignore-power", boolean_variant(true));
+        }
+
+        if flags.contains(InstallFlags::NO_HISTORY) {
+            options.insert("no-history", boolean_variant(true));
+        }
 
         let id: &str = id.as_ref().as_ref();
         let cb = |m: Message| m.append3(id, unsafe { OwnedFd::new(fd) }, options);
@@ -438,50 +476,65 @@ impl Client {
     }
 
     /// Listens for signals from the DBus daemon.
-    pub fn listen_signals<'a>(
-        &'a self,
+    pub fn listen_signals(
+        &self,
         cancellable: Arc<AtomicBool>,
-    ) -> impl Iterator<Item = Signal> + 'a {
-        fn filter_signal(ci: ConnectionItem) -> Option<Message> {
-            if let ConnectionItem::Signal(ci) = ci {
-                Some(ci)
-            } else {
-                None
-            }
-        }
+    ) -> zbus::Result<impl Iterator<Item = Signal> + '_> {
+        let connection = zbus::blocking::Connection::system()?;
 
-        fn read_signal<T: FromIterator<DBusEntry>>(
-            signal: Message,
-            method: &'static str,
-        ) -> Result<T, Error> {
-            let iter: Dict<String, Variant<Box<dyn RefArg + 'static>>, _> =
-                signal.read1().map_err(|why| Error::ArgumentMismatch(method, why))?;
+        let proxy = zbus::blocking::Proxy::new(
+            &connection,
+            "org.freedesktop.fwupd",
+            "/",
+            "org.freedesktop.fwupd",
+        )?;
 
-            Ok(T::from_iter(iter))
-        }
-
-        self.connection
-            .iter(TIMEOUT)
+        Ok(proxy
+            .receive_all_signals()?
             .take_while(move |_| cancellable.load(Ordering::SeqCst))
-            .filter_map(filter_signal)
             .filter_map(|signal| {
-                let signal = match &*signal.member().unwrap() {
-                    "Changed" => Ok(Signal::Changed),
-                    "DeviceAdded" => read_signal(signal, "DeviceAdded").map(Signal::DeviceAdded),
-                    "DeviceChanged" => {
-                        read_signal(signal, "DeviceChanged").map(Signal::DeviceChanged)
-                    }
-                    "DeviceRemoved" => {
-                        read_signal(signal, "DeviceRemoved").map(Signal::DeviceRemoved)
-                    }
-                    "PropertiesChanged" => signal
-                        .read3::<String, HashMap<String, DynVariant>, Vec<String>>()
-                        .map_err(|why| Error::ArgumentMismatch("PropertiesChanged", why))
-                        .map(|values| Signal::PropertiesChanged {
-                            interface:   values.0.into(),
-                            changed:     values.1,
-                            invalidated: values.2,
-                        }),
+                let signal: zbus::Result<Signal> = match &*signal.member().unwrap() {
+                    "DeviceRequest" => signal.body().map(|array: HashMap<String, Value>| {
+                        let mut request = request::Request::default();
+                        for (key, value) in array {
+                            match key.as_str() {
+                                "AppstreamId" => {
+                                    if let Value::Str(value) = value {
+                                        request.appstream_id = value.as_str().to_owned();
+                                    }
+                                }
+
+                                "Created" => {
+                                    if let Value::U64(value) = value {
+                                        request.created = value;
+                                    }
+                                }
+
+                                "Plugin" => {
+                                    if let Value::Str(value) = value {
+                                        request.plugin = value.as_str().to_owned();
+                                    }
+                                }
+
+                                "RequestKind" => {
+                                    if let Value::U32(value) = value {
+                                        request.request_kind = value;
+                                    }
+                                }
+
+                                "UpdateMessage" => {
+                                    if let Value::Str(value) = value {
+                                        request.update_message = value.as_str().to_owned();
+                                    }
+                                }
+
+                                _ => {
+                                    warn!("unknown DeviceRequest field: {}", key);
+                                }
+                            }
+                        }
+                        Signal::DeviceRequest(request::Request::default())
+                    }),
                     _ => return None,
                 };
 
@@ -492,7 +545,7 @@ impl Client {
                         None
                     }
                 }
-            })
+            }))
     }
 
     /// Modifies a device in some way.
@@ -548,6 +601,12 @@ impl Client {
         let message = self.call_method("GetResults", |m| m.append1(id))?;
         let iter: Option<Dict<String, Variant<Box<dyn RefArg + 'static>>, _>> = message.get1();
         Ok(iter.map(Device::from_iter))
+    }
+
+    /// Instructs the daemon about which features this client supports.
+    pub fn set_feature_flags(&self, feature_flags: FeatureFlags) -> Result<(), Error> {
+        self.call_method("SetFeatureFlags", |m| m.append1(feature_flags.bits()))?;
+        Ok(())
     }
 
     /// The daemon status, e.g. `Decompressing`.
@@ -666,6 +725,7 @@ impl Client {
 }
 
 /// Signal received by the daemon when listening for signal events with `Client::listen_signals()`.
+#[derive(Debug)]
 pub enum Signal {
     /// Some value on the interface or the number of devices or profiles has changed.
     Changed,
@@ -675,6 +735,8 @@ pub enum Signal {
     DeviceChanged(Device),
     /// A device has been removed.
     DeviceRemoved(Device),
+    /// Request for user interaction
+    DeviceRequest(Request),
     /// Triggers when a property has changed.
     PropertiesChanged {
         interface:   Box<str>,

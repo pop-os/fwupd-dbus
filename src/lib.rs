@@ -533,7 +533,7 @@ impl Client {
                                 }
                             }
                         }
-                        Signal::DeviceRequest(request::Request::default())
+                        Signal::DeviceRequest(request)
                     }),
                     _ => return None,
                 };

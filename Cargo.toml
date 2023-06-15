@@ -2,7 +2,7 @@
 name = "fwupd-dbus"
 version = "0.2.3"
 authors = ["Michael Aaron Murphy <mmstick@pm.me>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 description = "fwupd dbus client bindings"
 repository = "https://github.com/pop-os/fwupd-dbus"

@@ -1,7 +1,6 @@
 [package]
 name = "fwupd-dbus"
-version = "0.2.3"
-authors = ["Michael Aaron Murphy <mmstick@pm.me>"]
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "fwupd dbus client bindings"

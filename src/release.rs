@@ -109,6 +109,7 @@ impl FromIterator<DBusEntry> for Release {
                         .collect::<Vec<Box<str>>>()
                         .into_boxed_slice()
                 }
+                KEY_CREATED => release.created = dbus_u64(&value, key),
                 KEY_DESCRIPTION => release.description = dbus_str(&value, key).into(),
                 KEY_DETAILS_URL => release.details_url = Some(dbus_str(&value, key).into()),
                 KEY_FILENAME => release.filename = dbus_str(&value, key).into(),
